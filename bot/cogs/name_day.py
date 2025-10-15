@@ -55,8 +55,8 @@ class NameDay(commands.Cog):
     def _create_embed_leaderboard(self, leaderboard):
         """Helper to create an embed for name selection"""
         embed = discord.Embed(
-            title=f"💃🏻🏆 Putain D'Or",
-            description="O top3 das putas mais escolhidas",
+            title=f"💃🏻 PUTAIN D'OR 🏆",
+            description="Eis que são reveladas as putas mais escolhidas pelos nossos estimados clientes! 👑",
             color=discord.Color.gold()
         )
 
@@ -67,19 +67,19 @@ class NameDay(commands.Cog):
 
         # 2nd Place
         embed.add_field(
-                    name=f"🥈. {second[0]}",
+                    name=f"🥈 {second[0]}",
                     value=f"{second[1]} votos"
                 )
         
         # 1st Place
         embed.add_field(
-                    name=f"🥇. {first[0]}",
+                    name=f"🥇 {first[0]}",
                     value=f"{first[1]} votos"
                 )
         
         # 3rd Place
         embed.add_field(
-                    name=f"🏅. {third[0]}",
+                    name=f"🏅 {third[0]}",
                     value=f"{third[1]} votos"
                 )
 
