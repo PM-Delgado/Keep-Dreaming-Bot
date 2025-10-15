@@ -1,7 +1,8 @@
 import json
 import random
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+import pytz
 from bot import DATA_DIR
 
 class DBManager:
@@ -13,9 +14,10 @@ class DBManager:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
-                last_updated = datetime.fromisoformat(data['last_updated']).astimezone(timezone.utc)
-                now = datetime.now(timezone.utc)
-                # Compare UTC dates at midnight for daily reset
+                lisbon_tz = pytz.timezone('Europe/Lisbon')
+                last_updated = datetime.fromisoformat(data['last_updated']).astimezone(lisbon_tz)
+                now = datetime.now(lisbon_tz)
+                # Compare Lisbon dates at midnight for daily reset
                 if last_updated.date() >= now.date():
                     return data['name']
                     
@@ -31,9 +33,10 @@ class DBManager:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
-                last_updated = datetime.fromisoformat(data['last_updated']).astimezone(timezone.utc)
-                now = datetime.now(timezone.utc)
-                # Compare UTC dates at midnight for daily reset
+                lisbon_tz = pytz.timezone('Europe/Lisbon')
+                last_updated = datetime.fromisoformat(data['last_updated']).astimezone(lisbon_tz)
+                now = datetime.now(lisbon_tz)
+                # Compare Lisbon dates at midnight for daily reset
                 if last_updated.date() >= now.date():
                     return data['phrase']
                     
@@ -71,7 +74,7 @@ class DBManager:
             # Update current name
             current_data = {
                 'name': selected_name,
-                'last_updated': datetime.now(timezone.utc).astimezone().isoformat(),
+                'last_updated': datetime.now(pytz.timezone('Europe/Lisbon')).isoformat(),
                 'phrase': selected_phrase
             }
             
