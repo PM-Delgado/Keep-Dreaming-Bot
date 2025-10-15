@@ -46,6 +46,8 @@ class NameDay(commands.Cog):
             description=phrase,
             color=discord.Color.red()
         )
+        embed.set_thumbnail(url=os.getenv('ASSETS_URL') + "day_thumbnail.jpg")
+        embed.set_image(url=os.getenv('ASSETS_URL') + "day_thumbnail.jpg")
         embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
         return embed
 
