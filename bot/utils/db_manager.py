@@ -3,12 +3,14 @@ import random
 import os
 from datetime import datetime, timedelta, timezone
 
+from bot import DATA_DIR
+
 class DBManager:
     @staticmethod
     def get_current_name():
         """Get the current name of the day if it's still valid"""
         try:
-            with open('bot/data/name_of_the_day.json', 'r') as f:
+            with open(os.path.join(DATA_DIR, "names.json"), 'r') as f:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
@@ -26,7 +28,7 @@ class DBManager:
     def get_current_phrase():
         """Get the current name of the day if it's still valid"""
         try:
-            with open('bot/data/name_of_the_day.json', 'r') as f:
+            with open(os.path.join(DATA_DIR, "name_of_the_day.json"), 'r') as f:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
@@ -45,11 +47,11 @@ class DBManager:
         """Select a new random name and update statistics"""
         try:
             # Get all names
-            with open('bot/data/names.json', 'r', encoding='utf-8') as f:
+            with open(os.path.join(DATA_DIR, "names.json"), 'r', encoding='utf-8') as f:
                 names = json.load(f)
 
             # Get all phrases
-            with open('bot/data/phrases.json', 'r', encoding='utf-8') as f:
+            with open(os.path.join(DATA_DIR, "phrases.json"), 'r', encoding='utf-8') as f:
                 phrases = json.load(f)
 
             if not names or not phrases:
@@ -60,7 +62,7 @@ class DBManager:
             selected_phrase = random.choice(phrases).replace("{name}", selected_name)
             
             # Update stats
-            with open('bot/data/name_stats.json', 'r+', encoding='utf-8') as f:
+            with open(os.path.join(DATA_DIR, "name_stats.json"), 'r+', encoding='utf-8') as f:
                 stats = json.load(f)
                 stats[selected_name] = stats.get(selected_name, 0) + 1
                 f.seek(0)
@@ -74,7 +76,7 @@ class DBManager:
                 'phrase': selected_phrase
             }
             
-            with open('bot/data/name_of_the_day.json', 'w', encoding='utf-8') as f:
+            with open(os.path.join(DATA_DIR, "name_of_the_day.json"), 'w', encoding='utf-8') as f:
                 json.dump(current_data, f)
                 
             return selected_name
@@ -87,7 +89,7 @@ class DBManager:
     def get_leaderboard():
         """Get top 3 names by selection count"""
         try:
-            with open('bot/data/name_stats.json', 'r') as f:
+            with open(os.path.join(DATA_DIR, "name_stats.json"), 'r') as f:
                 stats = json.load(f)
                 
             sorted_names = sorted(stats.items(), key=lambda x: x[1], reverse=True)
