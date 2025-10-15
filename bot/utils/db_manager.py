@@ -2,7 +2,6 @@ import json
 import random
 import os
 from datetime import datetime, timedelta, timezone
-
 from bot import DATA_DIR
 
 class DBManager:

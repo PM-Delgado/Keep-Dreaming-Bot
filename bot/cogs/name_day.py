@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from bot.utils.db_manager import DBManager
 from datetime import datetime, timezone
+from bot import ASSETS_URL
 import os
 import logging
 import time
@@ -48,7 +49,7 @@ class NameDay(commands.Cog):
             description=phrase,
             color=discord.Color.red()
         )
-        embed.set_thumbnail(url=os.getenv('ASSETS_URL') + f"name_thumbnail.jpg?cachebust={int(time.time())}")
+        embed.set_thumbnail(url=ASSETS_URL + f"name_thumbnail.jpg?cachebust={int(time.time())}")
         embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
         return embed
     
@@ -83,7 +84,7 @@ class NameDay(commands.Cog):
                     value=f"{third[1]} votos"
                 )
 
-        embed.set_image(url=os.getenv('ASSETS_URL') + f"name_image.jpg?cachebust={int(time.time())}")
+        embed.set_image(url=ASSETS_URL + f"name_image.jpg?cachebust={int(time.time())}")
         embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
         return embed
 
