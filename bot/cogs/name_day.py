@@ -4,11 +4,17 @@ from discord import app_commands
 from bot.utils.db_manager import DBManager
 from datetime import datetime, timezone
 import os
+import logging
 
 class NameDay(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.daily_name_check.start()
+
+    def _log(self, level: str, msg: str) -> None:
+        logger = logging.getLogger('discord')
+        log_method = getattr(logger, level.lower(), logger.info)
+        log_method(msg)
 
     @tasks.loop(minutes=5)
     async def daily_name_check(self):
@@ -17,7 +23,7 @@ class NameDay(commands.Cog):
         if not current_name:
             new_name = DBManager.update_name_of_the_day()
             if new_name:
-                print(f"Selected new name of the day: {new_name}")
+                self._log('INFO', f"Updated name of the day to: {new_name}")
 
     @app_commands.command(
         name="name",
@@ -29,12 +35,19 @@ class NameDay(commands.Cog):
         if not current_name:
             current_name = DBManager.update_name_of_the_day() or "No names available"
             
-        embed = discord.Embed(
-            title="Name of the Day",
-            description=f"Today's special name is: **{current_name}**",
-            color=discord.Color.gold()
-        )
+        current_phrase = DBManager.get_current_phrase()
+        embed = self._create_embed(current_phrase)
         await ctx.response.send_message(embed=embed)
+
+    def _create_embed(self, phrase):
+        """Helper to create an embed for name selection"""
+        embed = discord.Embed(
+            title="Puta do dia 💃🏻",
+            description=phrase,
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
+        return embed
 
     @app_commands.command(
         name="leaderboard",
