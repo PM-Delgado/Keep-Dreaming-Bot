@@ -9,7 +9,7 @@ class DBManager:
     def get_current_name():
         """Get the current name of the day if it's still valid"""
         try:
-            with open(os.path.join(DATA_DIR, "names.json"), 'r') as f:
+            with open(os.path.join(DATA_DIR, "name_of_the_day.json"), 'r') as f:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
