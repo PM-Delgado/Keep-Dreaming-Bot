@@ -13,10 +13,10 @@ class DBManager:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
-                last_updated = datetime.fromisoformat(data['last_updated']).astimezone()
-                now = datetime.now(timezone.utc).astimezone()
-                # Reset both times to midnight for accurate daily comparison
-                if last_updated.replace(hour=0, minute=0, second=0, microsecond=0) == now.replace(hour=0, minute=0, second=0, microsecond=0):
+                last_updated = datetime.fromisoformat(data['last_updated']).astimezone(timezone.utc)
+                now = datetime.now(timezone.utc)
+                # Compare UTC dates at midnight for daily reset
+                if last_updated.date() >= now.date():
                     return data['name']
                     
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
@@ -31,10 +31,10 @@ class DBManager:
                 data = json.load(f)
                 
             if data['name'] and data['last_updated']:
-                last_updated = datetime.fromisoformat(data['last_updated']).astimezone()
-                now = datetime.now(timezone.utc).astimezone()
-                # Reset both times to midnight for accurate daily comparison
-                if last_updated.replace(hour=0, minute=0, second=0, microsecond=0) == now.replace(hour=0, minute=0, second=0, microsecond=0):
+                last_updated = datetime.fromisoformat(data['last_updated']).astimezone(timezone.utc)
+                now = datetime.now(timezone.utc)
+                # Compare UTC dates at midnight for daily reset
+                if last_updated.date() >= now.date():
                     return data['phrase']
                     
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
