@@ -4,11 +4,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 import logging
-
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = int(os.getenv("GUILD_ID"))
-DATA_DIR = os.getenv("DATA_DIR")
+from bot import TOKEN, GUILD_ID
 
 intents = discord.Intents.default()
 intents.message_content = True
