@@ -5,6 +5,7 @@ from bot.utils.db_manager import DBManager
 from datetime import datetime, timezone
 import os
 import logging
+import time
 
 class NameDay(commands.Cog):
     def __init__(self, bot):
@@ -36,18 +37,18 @@ class NameDay(commands.Cog):
             current_name = DBManager.update_name_of_the_day() or "No names available"
             
         current_phrase = DBManager.get_current_phrase()
-        embed = self._create_embed(current_phrase)
-        await ctx.response.send_message(embed=embed)
+        embed = self._create_embed(current_name, current_phrase)
+        content = f"{current_phrase}"
+        await ctx.response.send_message(content=content, embed=embed)
 
-    def _create_embed(self, phrase):
+    def _create_embed(self, name, phrase):
         """Helper to create an embed for name selection"""
         embed = discord.Embed(
-            title="Puta do dia 💃🏻",
+            title=f"💃🏻 Puta do Dia: **{name.upper()}**",
             description=phrase,
             color=discord.Color.red()
         )
-        embed.set_thumbnail(url=os.getenv('ASSETS_URL') + "day_thumbnail.jpg")
-        embed.set_image(url=os.getenv('ASSETS_URL') + "day_thumbnail.jpg")
+        embed.set_thumbnail(url=os.getenv('ASSETS_URL') + f"day_thumbnail.jpg?cachebust={int(time.time())}")
         embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
         return embed
 
