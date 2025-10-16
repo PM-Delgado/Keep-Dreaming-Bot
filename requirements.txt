@@ -1,4 +1,4 @@
 discord.py>=2.0.0
 python-dotenv
 pytz
-pomice>=3.0.0
+pomice>=2.10.0
