@@ -6,8 +6,5 @@ __pycache__/
 .env
 aws_connect.bat
 
-bot/data/name_of_the_day.json
-bot/data/name_stats.json
-
 # VSCode settings
 .vscode/
