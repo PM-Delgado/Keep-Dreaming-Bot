@@ -4,7 +4,12 @@ __pycache__/
 
 # Environment variables
 .env
-aws_connect.bat
 
 # VSCode settings
 .vscode/
+
+# Folders and files
+aws_connect.bat
+lavalink/plugins
+lavalink/logs
+lavalink/Lavalink.jar

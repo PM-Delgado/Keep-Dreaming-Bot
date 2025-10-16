@@ -1,0 +1,142 @@
+server:
+  port: 2333
+
+lavalink:
+  server:
+    sources:
+      youtube: false
+    password: ${LAVALINK_PASSWORD}
+    bufferDurationMs: 225
+    frameBufferDurationMs: 5000
+    youtubePlaylistLoadLimit: 3
+    opusEncodingQuality: 5
+    resamplingQuality: MEDIUM
+    trackStuckThresholdMs: 10000
+    playerUpdateInterval: 3
+    useSeekGhosting: true
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+    gc-warnings: true
+  plugins:
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.1"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasearch:lavasearch-plugin:1.0.0" # https://github.com/topi314/LavaSearch
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.15.0" # https://github.com/lavalink-devs/youtube-source
+      snapshot: false
+
+plugins:
+  youtube:
+    enabled: true
+    # To simplify signature deciphering, you can use a remote cipher server like yt-cipher, a lightweight Deno server with a REST API. More details are available at https://github.com/kikkia/yt-cipher
+    remoteCipher:
+      url: "http://localhost:8001" # The base URL of your remote cipher server.
+      password: "your_secret_password" # The password to authenticate with your remote cipher server.
+    oauth:
+      enabled: false
+      # refreshToken: "Insert your refresh token here" # For more details, please refer to https://github.com/lavalink-devs/youtube-source?tab=readme-ov-file#using-oauth-tokens
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # For more details about client setup, refer to https://github.com/lavalink-devs/youtube-source?tab=readme-ov-file#available-clients
+    clients:
+      - "ANDROID_MUSIC"
+      - "MUSIC"
+      - "WEB"
+      - "WEBEMBEDDED"
+      - "TVHTML5EMBEDDED"
+    ANDROID_MUSIC:
+      playlistLoading: false
+      videoLoading: true
+      searching: true
+      playback: true
+    MUSIC:
+      playlistLoading: false
+      videoLoading: false
+      searching: true
+      playback: false
+    WEB:
+      playlistLoading: false
+      videoLoading: true
+      searching: true
+      playback: true
+    WEBEMBEDDED:
+      playlistLoading: false
+      videoLoading: false
+      searching: false
+      playback: true
+    TVHTML5EMBEDDED:
+      playlistLoading: false
+      videoLoading: false
+      searching: false
+      playback: true
+  lavasrc:
+    providers:
+      - 'ytsearch:"%ISRC%"'
+      - "dzisrc:%ISRC%"
+      - "ytsearch:%QUERY%"
+      - "dzsearch:%QUERY%"
+      - "scsearch:%QUERY%"
+      - "tdsearch:%QUERY%"
+    sources:
+      spotify: true # Enable Spotify source
+      applemusic: false # Enable Apple Music source
+      soundcloud: true # Enable SoundCloud source
+      deezer: false # Enable Deezer source
+      yandexmusic: false # Enable Yandex Music source
+      flowerytts: false # Enable Flowery TTS source
+      youtube: true # Enable YouTube search source (https://github.com/topi314/LavaSearch)
+      tidal: false # Enable Tidal source
+      vkmusic: false # Enable Vk Music source
+      qobuz: false # Enabled qobuz source
+      ytdlp: true # Enable yt-dlp source
+    spotify:
+      # clientId & clientSecret are required for using spsearch
+      clientId: ${SPOTIFY_CLIENT_ID}
+      clientSecret: ${SPOTIFY_CLIENT_SECRET}
+      # spDc: "<insert>" # the sp dc cookie used for accessing the spotify lyrics api
+      preferAnonymousToken: false # Use this to generate and cache anonymous Spotify access tokens from your own endpoint, as Spotify recently updated their implementation.
+      resolveArtistsInSearch: true
+      albumLoadLimit: 2 # The number of pages at 50 tracks each
+      countryCode: "US"
+      playlistLoadLimit: 3 # The number of pages at 100 tracks each
+      localFiles: true
+    youtube:
+      countryCode: "US"
+      playlistLoadLimit: 1 # The number of pages at 100 tracks each
+      albumLoadLimit: 1 # The number of pages at 50 tracks each
+      artistLoadLimit: 1 # The number of pages at 10 tracks each
+    ytdlp:
+      path: "yt-dlp" # the path to the yt-dlp executable.
+      searchLimit: 10 # How many search results should be returned
+      # customLoadArgs: ["-q", "--no-warnings", "--flat-playlist", "--skip-download", "-J"] # Custom arguments to pass to yt-dlp
+      # customPlaybackArgs: ["-q", "--no-warnings", "-f", "bestaudio", "-J"] # Custom arguments for yt-dlp
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+sentry:
+  dsn: ""
+  environment: ""
+
+logging:
+  file:
+    max-history: 5
+    max-size: 10MB
+  path: ./logs/
+  level:
+    #root: DEBUG
+    lavalink: INFO
+  request:
+    enabled: true
+    includeClientInfo: true
+    includeHeaders: true
+    includeQueryString: true
+    includePayload: true
+    maxPayloadLength: 10000
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 5
