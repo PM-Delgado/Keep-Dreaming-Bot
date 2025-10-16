@@ -1,17 +1,16 @@
 import discord
-from discord.ext import commands, tasks
-from discord import app_commands
-from bot.utils.db_manager import DBManager
-from datetime import datetime, timezone
-from bot import ASSETS_URL
 import os
 import logging
 import time
+from discord.ext import commands, tasks
+from discord import app_commands
+from bot.utils.db_manager import DBManager
+from bot import ASSETS_URL
 
 class NameDay(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.daily_name_check.start()
+        self._daily_name_check.start()
 
     def _log(self, level: str, msg: str) -> None:
         logger = logging.getLogger('discord')
@@ -19,49 +18,25 @@ class NameDay(commands.Cog):
         log_method(msg)
 
     @tasks.loop(minutes=5)
-    async def daily_name_check(self):
-        """Check every 5 minutes if we need to update the name of the day"""
+    async def _daily_name_check(self):
+        # Check every 5 minutes if we need to update the name of the day
         current_name = DBManager.get_current_name()
         if not current_name:
             new_name = DBManager.update_name_of_the_day()
             if new_name:
                 self._log('INFO', f"Updated name of the day to: {new_name}")
+        
+        self._log('INFO', f'Checked name of the day; no update needed.')
 
-    @app_commands.command(
-        name="puta",
-        description="Mostra qual foi a puta escolhida para o dia de hoje.")
-    @app_commands.guilds(discord.Object(id=int(os.getenv('GUILD_ID'))))
-    async def get_name(self, ctx):
-        """Get the current name of the day"""
-        current_name = DBManager.get_current_name()
-        if not current_name:
-            current_name = DBManager.update_name_of_the_day() or "No names available"
-            
-        current_phrase = DBManager.get_current_phrase()
-        embed = self._create_embed_name(current_name, current_phrase)
-        content = f"{current_phrase}"
-        await ctx.response.send_message(content=content, embed=embed)
-
-    def _create_embed_name(self, name, phrase):
-        """Helper to create an embed for name selection"""
-        embed = discord.Embed(
-            title=f"💃🏻 Puta do Dia: **{name.upper()}**",
-            description=phrase,
-            color=discord.Color.red()
-        )
-        embed.set_thumbnail(url=ASSETS_URL + f"name_thumbnail.jpg?cachebust={int(time.time())}")
-        embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
-        return embed
-    
     def _create_embed_leaderboard(self, leaderboard):
-        """Helper to create an embed for name selection"""
+        # Helper to create an embed for name selection
         embed = discord.Embed(
             title=f"💃🏻 PUTAIN D'OR 🏆",
             description="Eis que são reveladas as putas mais escolhidas pelos nossos estimados clientes! 👑",
             color=discord.Color.gold()
         )
 
-            # Extrai os 3 primeiros
+        # Extrai os 3 primeiros
         second = leaderboard[1] if len(leaderboard) > 1 else ("—", 0)
         first = leaderboard[0]
         third = leaderboard[2] if len(leaderboard) > 2 else ("—", 0)
@@ -88,12 +63,38 @@ class NameDay(commands.Cog):
         embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
         return embed
 
+    def _create_embed_name(self, name, phrase):
+        # Helper to create an embed for name selection
+        embed = discord.Embed(
+            title=f"💃🏻 Puta do Dia: **{name.upper()}**",
+            description=phrase,
+            color=discord.Color.red()
+        )
+        embed.set_thumbnail(url=ASSETS_URL + f"name_thumbnail.jpg?cachebust={int(time.time())}")
+        embed.set_footer(text="Bada Bing! - Route 17, Lodi, New Jersey")
+        return embed
+    
+    @app_commands.command(
+        name="puta",
+        description="Mostra qual foi a puta escolhida para o dia de hoje.")
+    @app_commands.guilds(discord.Object(id=int(os.getenv('GUILD_ID'))))
+    async def get_name(self, ctx):
+        # Get the current name of the day
+        current_name = DBManager.get_current_name()
+        if not current_name:
+            current_name = DBManager.update_name_of_the_day() or "No names available"
+            
+        current_phrase = DBManager.get_current_phrase()
+        embed = self._create_embed_name(current_name, current_phrase)
+        content = f"{current_phrase}"
+        await ctx.response.send_message(content=content, embed=embed)
+
     @app_commands.command(
         name="putaindor",
         description="Ranking das putas mais escolhidas.")
     @app_commands.guilds(discord.Object(id=int(os.getenv('GUILD_ID'))))
     async def name_leaderboard(self, ctx):
-        """Show top 3 most selected names"""
+        # Show top 3 most selected names
         leaderboard = DBManager.get_leaderboard()
         
         embed = self._create_embed_leaderboard(leaderboard)

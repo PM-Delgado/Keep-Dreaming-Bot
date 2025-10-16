@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 import os
 import asyncio
-from dotenv import load_dotenv
 import logging
 from bot import TOKEN, GUILD_ID
 
@@ -40,11 +39,11 @@ async def load_cogs():
         if filename.endswith(".py") and not filename.startswith("__"):
             cog_name = filename[:-3]
             await bot.load_extension(f"bot.cogs.{cog_name}")
-            print(f"✅ Loaded cog: {cog_name}")
+            logger.info(f"✅ Loaded cog: {cog_name}")
 
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
+    logger.info(f"✅ Logged in as {bot.user}")
 
 async def main():
     async with bot:
