@@ -1,4 +1,9 @@
-from bot.bot import bot
+from bot.bot import main
+import logging
+import asyncio
 
 if __name__ == '__main__':
-    bot.run()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.getLogger("discord").info("🛑 Bot stopped by user.")

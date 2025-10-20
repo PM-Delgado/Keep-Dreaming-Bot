@@ -49,8 +49,3 @@ async def main():
     async with bot:
         await load_cogs()
         await bot.start(TOKEN)
-
-try:
-    asyncio.run(main())
-except KeyboardInterrupt:
-    logger.info(f'Bot stopped by user.')
