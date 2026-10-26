@@ -24,3 +24,37 @@ def test_missing_value_raises(missing):
 def test_non_numeric_guild_id():
     with pytest.raises(ConfigError, match="GUILD_ID"):
         load_settings({**VALID, "GUILD_ID": "abc"})
+
+
+def test_admin_ids_default_to_nobody():
+    assert load_settings(VALID).admin_ids == frozenset()
+    assert load_settings({**VALID, "ADMIN_USER_IDS": " , "}).admin_ids == frozenset()
+
+
+def test_admin_ids_are_parsed():
+    s = load_settings({**VALID, "ADMIN_USER_IDS": "111, 222 ,111"})
+    assert s.admin_ids == frozenset({111, 222})
+
+
+def test_invalid_admin_id_raises():
+    with pytest.raises(ConfigError, match="ADMIN_USER_IDS"):
+        load_settings({**VALID, "ADMIN_USER_IDS": "111,abc"})
+
+
+def test_riot_settings_are_optional_with_a_default_platform():
+    s = load_settings(VALID)
+    assert s.riot_api_key is None
+    assert s.riot_default_platform == "euw1"
+    assert load_settings({**VALID, "RIOT_API_KEY": "   "}).riot_api_key is None
+
+
+def test_riot_settings_are_read_and_the_key_is_not_in_the_repr():
+    s = load_settings({**VALID, "RIOT_API_KEY": "RGAPI-secret", "RIOT_DEFAULT_PLATFORM": " NA1 "})
+    assert s.riot_api_key == "RGAPI-secret"
+    assert s.riot_default_platform == "na1"
+    assert "RGAPI-secret" not in repr(s)
+
+
+def test_invalid_riot_platform_raises():
+    with pytest.raises(ConfigError, match="RIOT_DEFAULT_PLATFORM"):
+        load_settings({**VALID, "RIOT_DEFAULT_PLATFORM": "mars1"})

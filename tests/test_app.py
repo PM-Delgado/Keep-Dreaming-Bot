@@ -22,8 +22,13 @@ async def test_registers_exactly_the_expected_commands():
         for ext in EXTENSIONS:  # stops the daily task
             await bot.unload_extension(ext)
         await bot.db.close()
-    assert names == {"puta", "putaindor", "sync"}
-    assert EXTENSIONS == ("bot.features.nameday.cog", "bot.features.admin.cog")
+    assert names == {"puta", "putaindor", "sync", "register", "profile", "admin", "riot"}
+    assert EXTENSIONS == (
+        "bot.features.nameday.cog",
+        "bot.features.admin.cog",
+        "bot.features.players.cog",
+        "bot.features.riot.cog",
+    )
 
 
 def test_leaderboard_embed_handles_fewer_than_three():

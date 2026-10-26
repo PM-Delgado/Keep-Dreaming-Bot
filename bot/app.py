@@ -14,6 +14,8 @@ log = logging.getLogger(__name__)
 EXTENSIONS = (
     "bot.features.nameday.cog",
     "bot.features.admin.cog",
+    "bot.features.players.cog",
+    "bot.features.riot.cog",  # optional; must load after players (plugs into its services)
 )
 
 
