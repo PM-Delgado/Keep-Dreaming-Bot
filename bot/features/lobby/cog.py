@@ -8,8 +8,14 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from bot.features.lobby.mock import MockPlayers
-from bot.features.lobby.render import build_lobby_embed, ready_check_ping
-from bot.features.lobby.repository import LobbyRepository
+from bot.features.lobby.render import (
+    build_list_embed,
+    build_lobby_embed,
+    ready_check_ping,
+    scheduled_ping,
+)
+from bot.features.lobby.repository import ACTIVE, LobbyRepository, LobbyRow
+from bot.features.lobby.schedule import EXAMPLES
 from bot.features.lobby.service import LobbyParams, LobbyService, LobbySnapshot, LobbyUpdate
 from bot.features.lobby.views import LobbyView
 from bot.features.players.choices import ROLE_CHOICES
@@ -49,7 +55,11 @@ class Lobby(commands.Cog):
     @tasks.loop(seconds=SWEEP_SECONDS)
     async def sweeper(self) -> None:
         try:
-            updates = [*await self.service.process_deadlines(), *await self.service.expire_idle()]
+            updates = [
+                *await self.service.process_schedules(),
+                *await self.service.process_deadlines(),
+                *await self.service.expire_idle(),
+            ]
         except Exception:
             log.exception("Lobby sweeper failed")
             return
@@ -82,17 +92,8 @@ class Lobby(commands.Cog):
         except (discord.HTTPException, AttributeError):
             log.warning("Could not update the message of lobby %s", lobby.id, exc_info=True)
 
-    async def notify(self, update: LobbyUpdate) -> None:
-        """Ping the players (never mock ones) when a ready-check starts or restarts."""
-        events = update.events
-        if not {"ready_check_started", "roster_changed", "timeout"} & set(events):
-            return
-        restarted = "ready_check_started" not in events
-        text = ready_check_ping(update.snapshot, restarted)
-        if text is None:
-            return
-        lobby = update.snapshot.lobby
-        users = [discord.Object(id=e.discord_id) for e in update.snapshot.roster if not e.is_mock]
+    async def _send_ping(self, lobby: LobbyRow, text: str, discord_ids: list[int]) -> None:
+        users = [discord.Object(id=i) for i in discord_ids]
         try:
             channel = self.bot.get_channel(lobby.channel_id) or await self.bot.fetch_channel(
                 lobby.channel_id
@@ -102,6 +103,21 @@ class Lobby(commands.Cog):
             )
         except (discord.HTTPException, AttributeError):
             log.warning("Could not ping lobby %s", lobby.id, exc_info=True)
+
+    async def notify(self, update: LobbyUpdate) -> None:
+        """Ping real players (never mock ones): ready-check (re)starts, scheduled reminders."""
+        events = set(update.events)
+        lobby = update.snapshot.lobby
+        if {"ready_check_started", "roster_changed", "timeout"} & events:
+            text = ready_check_ping(update.snapshot, "ready_check_started" not in events)
+            if text is not None:
+                await self._send_ping(
+                    lobby, text, [e.discord_id for e in update.snapshot.roster if not e.is_mock]
+                )
+        for event in ("reminder", "short_of_players"):
+            if event in events and (ping := scheduled_ping(update.snapshot, event)) is not None:
+                text, recipients = ping
+                await self._send_ping(lobby, text, [e.discord_id for e in recipients])
 
     # --- button handlers ----
 
@@ -151,22 +167,67 @@ class Lobby(commands.Cog):
         sent = await interaction.original_response()
         await self.service.attach_message(update.snapshot.lobby.id, sent.id, interaction.channel_id)
 
-    @lobby.command(name="show", description="Volta a mostrar a lobby aberta neste canal.")
-    async def show_lobby(self, interaction: discord.Interaction) -> None:
+    async def _resolve(self, interaction: discord.Interaction, lobby_id: int | None):
+        """The lobby a command is about: the given id, else the server's open lobby."""
+        if interaction.guild_id is None:
+            return None
+        if lobby_id is None:
+            return await self.service.open_lobby(interaction.guild_id)
+        row = await self.service.repo.get(lobby_id)
+        ok = row is not None and row.guild_id == interaction.guild_id and row.status in ACTIVE
+        return row if ok else None
+
+    @lobby.command(name="schedule", description="Agenda uma lobby para mais tarde.")
+    @app_commands.describe(
+        when=f"Quando (hora de Lisboa): {EXAMPLES}.", note="Uma nota opcional (ex.: noite de flex)."
+    )
+    async def schedule_lobby(
+        self, interaction: discord.Interaction, when: str, note: str | None = None
+    ) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
             return
-        lobby = await self.service.open_lobby(interaction.guild_id)
-        if lobby is None:
+        try:
+            update = await self.service.schedule(
+                interaction.guild_id, interaction.channel_id, interaction.user.id, when, note
+            )
+        except PlayerError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        await interaction.response.send_message(**self.message_kwargs(update.snapshot))
+        sent = await interaction.original_response()
+        await self.service.attach_message(update.snapshot.lobby.id, sent.id, interaction.channel_id)
+
+    @lobby.command(name="list", description="Mostra a lobby aberta e as agendadas.")
+    async def list_lobbies(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
+            return
+        open_row = await self.service.open_lobby(interaction.guild_id)
+        open_snapshot = await self.service.snapshot(open_row.id) if open_row else None
+        scheduled = await self.service.list_scheduled(interaction.guild_id)
+        await interaction.response.send_message(
+            embed=build_list_embed(open_snapshot, scheduled), allowed_mentions=NO_MENTIONS
+        )
+
+    @lobby.command(name="show", description="Volta a mostrar uma lobby neste canal.")
+    @app_commands.describe(lobby="O número da lobby (por defeito, a aberta).")
+    async def show_lobby(self, interaction: discord.Interaction, lobby: int | None = None) -> None:
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
+            return
+        lobby_row = await self._resolve(interaction, lobby)
+        if lobby_row is None:
             await interaction.response.send_message(
-                "Não há nenhuma lobby aberta. Usa /lobby open.", ephemeral=True
+                "Não encontrei essa lobby. Usa /lobby list.", ephemeral=True
             )
             return
-        snapshot = await self.service.snapshot(lobby.id)
+        lobby = lobby_row  # type: ignore[assignment]
+        snapshot = await self.service.snapshot(lobby_row.id)
         await interaction.response.send_message(**self.message_kwargs(snapshot))
         sent = await interaction.original_response()
-        old_channel, old_message = lobby.channel_id, lobby.message_id
-        await self.service.attach_message(lobby.id, sent.id, interaction.channel_id)
+        old_channel, old_message = lobby_row.channel_id, lobby_row.message_id
+        await self.service.attach_message(lobby_row.id, sent.id, interaction.channel_id)
         if old_message is not None:  # remove the stale copy so there is one live message
             try:
                 channel = self.bot.get_channel(old_channel) or await self.bot.fetch_channel(
@@ -176,16 +237,17 @@ class Lobby(commands.Cog):
             except (discord.HTTPException, AttributeError):
                 pass
 
-    @lobby.command(name="cancel", description="Cancela a lobby aberta (criador ou admin).")
-    async def cancel_lobby(self, interaction: discord.Interaction) -> None:
-        lobby = (
-            await self.service.open_lobby(interaction.guild_id) if interaction.guild_id else None
-        )
-        if lobby is None:
-            await interaction.response.send_message("Não há lobby aberta.", ephemeral=True)
+    @lobby.command(name="cancel", description="Cancela uma lobby (criador ou admin).")
+    @app_commands.describe(lobby="O número da lobby (por defeito, a aberta).")
+    async def cancel_lobby(
+        self, interaction: discord.Interaction, lobby: int | None = None
+    ) -> None:
+        row = await self._resolve(interaction, lobby)
+        if row is None:
+            await interaction.response.send_message("Não encontrei essa lobby.", ephemeral=True)
             return
         try:
-            update = await self.service.cancel(lobby.id, interaction.user.id, "cancelada")
+            update = await self.service.cancel(row.id, interaction.user.id, "cancelada")
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
@@ -194,10 +256,10 @@ class Lobby(commands.Cog):
 
     # --- /mock (admin, testing) ----
 
-    async def _current_lobby(self, interaction: discord.Interaction) -> int:
-        lobby = (
-            await self.service.open_lobby(interaction.guild_id) if interaction.guild_id else None
-        )
+    async def _current_lobby(
+        self, interaction: discord.Interaction, lobby_id: int | None = None
+    ) -> int:
+        lobby = await self._resolve(interaction, lobby_id)
         if lobby is None:
             raise PlayerError("Não há lobby aberta. Usa /lobby open primeiro.")
         return lobby.id
@@ -225,11 +287,16 @@ class Lobby(commands.Cog):
         await interaction.response.send_message(f"Criados: {names}.", ephemeral=True)
 
     @mock_group.command(name="fill", description="Mete jogadores de teste na lobby aberta.")
-    @app_commands.describe(count="Quantos (por defeito 9: tu + 9 = 10).")
+    @app_commands.describe(
+        count="Quantos (por defeito 9: tu + 9 = 10).",
+        lobby="O número da lobby (por defeito, a aberta; usa para agendadas).",
+    )
     @admin_only
-    async def mock_fill(self, interaction: discord.Interaction, count: int = 9) -> None:
+    async def mock_fill(
+        self, interaction: discord.Interaction, count: int = 9, lobby: int | None = None
+    ) -> None:
         try:
-            lobby_id = await self._current_lobby(interaction)
+            lobby_id = await self._current_lobby(interaction, lobby)
             await interaction.response.defer(ephemeral=True)
             result = await self.mock.fill(lobby_id, count, interaction.user.id)
         except PlayerError as exc:
@@ -248,9 +315,9 @@ class Lobby(commands.Cog):
 
     @mock_group.command(name="ready", description="Confirma (Pronto) todos os jogadores de teste.")
     @admin_only
-    async def mock_ready(self, interaction: discord.Interaction) -> None:
+    async def mock_ready(self, interaction: discord.Interaction, lobby: int | None = None) -> None:
         try:
-            update = await self.mock.ready_all(await self._current_lobby(interaction))
+            update = await self.mock.ready_all(await self._current_lobby(interaction, lobby))
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
@@ -259,9 +326,9 @@ class Lobby(commands.Cog):
 
     @mock_group.command(name="drop", description="Os jogadores de teste saem da lobby.")
     @admin_only
-    async def mock_drop(self, interaction: discord.Interaction) -> None:
+    async def mock_drop(self, interaction: discord.Interaction, lobby: int | None = None) -> None:
         try:
-            update = await self.mock.drop_all(await self._current_lobby(interaction))
+            update = await self.mock.drop_all(await self._current_lobby(interaction, lobby))
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return

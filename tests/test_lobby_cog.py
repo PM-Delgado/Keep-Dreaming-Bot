@@ -13,9 +13,11 @@ from bot.features.lobby.cog import Lobby
 from bot.features.lobby.mock import MockPlayers
 from bot.features.lobby.render import (
     band_text,
+    build_list_embed,
     build_lobby_embed,
     fit_note,
     ready_check_ping,
+    scheduled_ping,
     team_text,
 )
 from bot.features.lobby.views import ACTIONS, VISIBLE, LobbyView
@@ -439,6 +441,141 @@ def test_ping_text_helper_returns_none_when_everyone_is_ready_or_a_mock():
     assert ready_check_ping(snapshot, False) is None  # type: ignore[arg-type]
 
 
+# --- scheduled lobbies ----
+
+WHEN = "23:00"  # 22:00 UTC; the fake clock starts at 20:00 UTC
+
+
+async def schedule_as(env, user_id: int = 1, when: str = WHEN, note: str | None = None) -> int:
+    await env.stack.register(1)
+    ix = FakeInteraction(user_id)
+    await env.cog.schedule_lobby.callback(env.cog, ix, when, note)
+    [lobby] = await env.stack.lobbies.list_scheduled(GUILD)
+    return lobby.lobby.id
+
+
+async def test_schedule_posts_a_scheduled_message_and_remembers_it(env):
+    lobby_id = await schedule_as(env, note="noite de flex")
+    row = await env.stack.lobbies.repo.get(lobby_id)
+    assert row is not None
+    assert row.message_id == 777
+    assert await env.stack.lobbies.open_lobby(GUILD) is None  # does not take the "open" slot
+
+
+async def test_schedule_rejects_bad_times_with_an_ephemeral_hint(env):
+    await env.stack.register(1)
+    ix = FakeInteraction(1)
+    await env.cog.schedule_lobby.callback(env.cog, ix, "blah", None)
+    assert ix.sent[0]["ephemeral"] is True
+    assert "21:00" in ix.sent[0]["content"]  # examples are shown
+    assert await env.stack.lobbies.list_scheduled(GUILD) == []
+
+
+async def test_the_scheduled_embed_shows_the_time_the_note_and_the_sign_ups(env):
+    lobby_id = await schedule_as(env, note="noite de flex")
+    snap = await env.stack.lobbies.snapshot(lobby_id)
+    text = text_of(build_lobby_embed(snap))
+    assert "Agendada" in text
+    assert "noite de flex" in text
+    assert f"<t:{int(snap.lobby.scheduled_for.timestamp())}:F>" in text
+    assert "Jogadores (1/10)" in text
+    assert "hora já passou" not in text
+
+
+async def test_after_the_time_the_embed_says_it_waits_for_ten_players(env):
+    lobby_id = await schedule_as(env)
+    env.stack.clock.advance(hours=3)
+    await env.cog.service.process_schedules()
+    text = text_of(build_lobby_embed(await env.stack.lobbies.snapshot(lobby_id)))
+    assert "hora já passou" in text
+
+
+async def test_list_shows_the_open_lobby_and_the_scheduled_ones(env):
+    await open_as(env)
+    await env.stack.register(2, start=1)
+    ix = FakeInteraction(2)
+    ix._original = FakeMessage(888)  # a different Discord message
+    await env.cog.schedule_lobby.callback(env.cog, ix, "amanhã 21:00", "x")
+    ix = FakeInteraction(1)
+    await env.cog.list_lobbies.callback(env.cog, ix)
+    text = text_of(ix.sent[0]["embed"])
+    assert "Aberta" in text
+    assert "1/10" in text
+    assert text.count("#") == 2
+    assert "x" in text
+
+
+def test_the_list_embed_is_friendly_when_there_is_nothing():
+    assert "Não há" in (build_list_embed(None, []).description or "")
+
+
+async def test_show_and_cancel_accept_a_lobby_number(env):
+    lobby_id = await schedule_as(env)
+    ix = FakeInteraction(1)
+    await env.cog.show_lobby.callback(env.cog, ix, lobby_id)
+    assert "Agendada" in text_of(ix.sent[0]["embed"])
+    ix = FakeInteraction(1)
+    await env.cog.show_lobby.callback(env.cog, ix, 4242)
+    assert "Não encontrei" in ix.sent[0]["content"]
+    ix = FakeInteraction(1)
+    await env.cog.cancel_lobby.callback(env.cog, ix, lobby_id)
+    row = await env.stack.lobbies.repo.get(lobby_id)
+    assert row is not None
+    assert row.status == "CANCELLED"
+
+
+async def test_a_lobby_of_another_server_cannot_be_reached_by_number(env):
+    lobby_id = await schedule_as(env)
+    ix = FakeInteraction(1)
+    ix.guild_id = GUILD + 1
+    await env.cog.cancel_lobby.callback(env.cog, ix, lobby_id)
+    assert "Não encontrei" in ix.sent[0]["content"]
+    row = await env.stack.lobbies.repo.get(lobby_id)
+    assert row is not None
+    assert row.status == "OPEN"
+
+
+async def test_the_sweeper_sends_the_reminder_once_and_pings_real_players_only(env):
+    lobby_id = await schedule_as(env)
+    await env.mock.fill(lobby_id, 3, ADMIN)
+    env.stack.clock.advance(minutes=95)  # 21:35 UTC: 25 minutes before the start
+    await env.cog.sweeper.coro(env.cog)
+    await env.cog.sweeper.coro(env.cog)
+    [ping] = env.channel.sent
+    assert "Lembrete" in ping["content"]
+    assert "<@1>" in ping["content"]
+    assert "<@-" not in ping["content"]
+    assert "4/10" in ping["content"]
+    assert [u.id for u in ping["allowed_mentions"].users] == [1]
+    assert env.channel.messages[777].edits  # the message was refreshed too
+
+
+async def test_a_short_lobby_at_the_time_pings_everyone_signed_up(env):
+    await schedule_as(env)
+    env.stack.clock.advance(hours=2, minutes=1)
+    await env.cog.sweeper.coro(env.cog)
+    pings = [m["content"] for m in env.channel.sent]
+    assert any("só há 1/10" in text for text in pings)
+
+
+async def test_mock_fill_can_target_a_scheduled_lobby_and_it_starts_at_the_time(env):
+    lobby_id = await schedule_as(env)
+    ix = FakeInteraction(ADMIN)
+    await env.cog.mock_fill.callback(env.cog, ix, 9, lobby_id)  # type: ignore[arg-type]
+    snap = await env.stack.lobbies.snapshot(lobby_id)
+    assert snap.lobby.status == "OPEN"  # ten sign-ups, but the time has not come
+    assert len(snap.roster) == 10
+    env.stack.clock.advance(hours=2, minutes=1)
+    await env.cog.sweeper.coro(env.cog)
+    snap = await env.stack.lobbies.snapshot(lobby_id)
+    assert snap.lobby.status == "READY_CHECK"
+
+
+def test_scheduled_ping_is_none_without_real_players():
+    lobby = SimpleNamespace(id=1, scheduled_for=None)
+    assert scheduled_ping(SimpleNamespace(lobby=lobby, roster=[], reserves=[]), "reminder") is None  # type: ignore[arg-type]
+
+
 # --- extension wiring ----
 
 
@@ -455,7 +592,13 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
         top = {c.name: c for c in bot.tree.get_commands()}
         lobby_commands: Any = top["lobby"]
         mock_commands: Any = top["mock"]
-        assert {c.name for c in lobby_commands.commands} == {"open", "show", "cancel"}
+        assert {c.name for c in lobby_commands.commands} == {
+            "open",
+            "schedule",
+            "list",
+            "show",
+            "cancel",
+        }
         assert {c.name for c in mock_commands.commands} == {
             "create",
             "fill",

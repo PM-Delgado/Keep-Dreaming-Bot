@@ -36,6 +36,7 @@ from bot.features.lobby.repository import (
     LobbyRow,
     OpenLobbyExists,
 )
+from bot.features.lobby.schedule import ScheduleError, parse_when
 from bot.features.players.repository import Player
 from bot.features.players.service import PlayerError, PlayerService
 from bot.features.ratings.service import RatingService
@@ -54,6 +55,9 @@ class LobbyParams:
     ready_check_seconds: int = 120
     idle_hours: float = 3.0  # an unfinished lobby with no activity for this long is cancelled
     in_progress_hours: float = 12.0  # until results exist (M3), a started game expires after this
+    reminder_minutes: int = 30  # scheduled lobbies remind their sign-ups this long before the start
+    min_lead_minutes: int = 1
+    max_days_ahead: int = 14
 
 
 @dataclass(frozen=True)
@@ -125,8 +129,7 @@ class LobbyService:
 
     async def open(self, guild_id: int, channel_id: int, discord_id: int) -> LobbyUpdate:
         player = await self.players.require(discord_id)
-        elsewhere = await self.repo.active_lobby_of(player.id)
-        if elsewhere is not None:
+        if await self.repo.busy_lobby_of(player.id) is not None:
             raise PlayerError("Já estás numa lobby ativa. Sai dela primeiro.")
         try:
             lobby = await self.repo.create(
@@ -137,6 +140,35 @@ class LobbyService:
                 "Já existe uma lobby aberta neste servidor. Usa /lobby show."
             ) from None
         return await self.join_player(lobby.id, player)
+
+    async def schedule(
+        self,
+        guild_id: int,
+        channel_id: int,
+        discord_id: int,
+        when_text: str,
+        note: str | None = None,
+    ) -> LobbyUpdate:
+        """Create a lobby for a future time; people sign up in advance and the ready-check
+        starts at that time (or as soon as ten are signed up after it)."""
+        player = await self.players.require(discord_id)
+        now = self.clock()
+        try:
+            when = parse_when(when_text, now)
+        except ScheduleError as exc:
+            raise PlayerError(str(exc)) from exc
+        if when - now < timedelta(minutes=self.params.min_lead_minutes):
+            raise PlayerError("A hora tem de ser daqui a pelo menos um minuto.")
+        if when - now > timedelta(days=self.params.max_days_ahead):
+            raise PlayerError(f"Só podes agendar até {self.params.max_days_ahead} dias à frente.")
+        note = " ".join((note or "").split())[:100] or None
+        lobby = await self.repo.create(
+            guild_id, channel_id, "scheduled", discord_id, now, scheduled_for=when, note=note
+        )
+        return await self.join_player(lobby.id, player)
+
+    async def list_scheduled(self, guild_id: int) -> list[LobbySnapshot]:
+        return [await self.snapshot(row.id) for row in await self.repo.list_scheduled(guild_id)]
 
     async def attach_message(self, lobby_id: int, message_id: int, channel_id: int | None = None):
         await self.repo.set_message(lobby_id, message_id, channel_id)
@@ -157,10 +189,11 @@ class LobbyService:
             lobby = await self._require(lobby_id)
             if lobby.status not in BLOCKING:
                 raise PlayerError("Esta lobby já não aceita jogadores.")
-            elsewhere = await self.repo.active_lobby_of(player.id)
-            if elsewhere is not None and elsewhere.id != lobby_id:
-                raise PlayerError("Já estás noutra lobby ativa.")
             now = self.clock()
+            if self._needs_free_player(lobby, now) and (
+                await self.repo.busy_lobby_of(player.id, lobby_id) is not None
+            ):
+                raise PlayerError("Já estás noutra lobby ativa.")
             if not await self.repo.join(lobby_id, player.id, now):
                 raise PlayerError("Já estás nesta lobby.")
             await self.repo.touch(lobby_id, now)
@@ -265,6 +298,45 @@ class LobbyService:
                 updates.append(await self._after_change(lobby.id, ["timeout"]))
         return updates
 
+    async def process_schedules(self, now: datetime | None = None) -> list[LobbyUpdate]:
+        """Reminders and starts for scheduled lobbies (called by the sweeper).
+
+        * `reminder`: once, `reminder_minutes` before the start;
+        * at the start time: begin the ready-check if ten are signed up, else say we are short
+          (`short_of_players`, once); sign-ups after that start it as soon as there are ten.
+
+        `reminder_stage` is stored, so nothing is sent twice, even across restarts.
+        """
+        now = now or self.clock()
+        stale = timedelta(hours=self.params.idle_hours)
+        remind = timedelta(minutes=self.params.reminder_minutes)
+        updates = []
+        for lobby in await self.repo.list_by_status([OPEN]):
+            when = lobby.scheduled_for
+            if lobby.kind != "scheduled" or when is None or now < when - remind:
+                continue
+            if now - when > stale:
+                continue  # missed by hours (e.g. the bot was down): let expiry close it
+            async with self._lock(lobby.id):
+                current = await self.repo.get(lobby.id)
+                if current is None or current.status != OPEN:
+                    continue
+                events: list[str] = []
+                if now >= when:
+                    if current.reminder_stage >= 2:
+                        continue
+                    await self._reconcile(lobby.id, events)
+                    after = await self.repo.get(lobby.id)
+                    if await self.repo.set_reminder_stage(lobby.id, 2) and (
+                        after is not None and after.status == OPEN
+                    ):
+                        events.append("short_of_players")
+                elif await self.repo.set_reminder_stage(lobby.id, 1):
+                    events.append("reminder")
+                if events:
+                    updates.append(LobbyUpdate(await self.snapshot(lobby.id), events))
+        return updates
+
     async def expire_idle(self, now: datetime | None = None) -> list[LobbyUpdate]:
         now = now or self.clock()
         updates = []
@@ -272,7 +344,10 @@ class LobbyService:
         started = timedelta(hours=self.params.in_progress_hours)
         for lobby in await self.repo.list_by_status(ACTIVE):
             limit = started if lobby.status == IN_PROGRESS else idle
-            if now - lobby.updated_at < limit:
+            baseline = lobby.updated_at
+            if lobby.scheduled_for is not None and lobby.status == OPEN:
+                baseline = max(baseline, lobby.scheduled_for)  # a future lobby is not idle yet
+            if now - baseline < limit:
                 continue
             async with self._lock(lobby.id):
                 current = await self.repo.get(lobby.id)
@@ -351,6 +426,28 @@ class LobbyService:
     def _roster(entries: Sequence[EntryRow]) -> list[EntryRow]:
         return [e for e in entries if e.status != "dropped"][:ROSTER_SIZE]
 
+    @staticmethod
+    def _time_reached(lobby: LobbyRow, now: datetime) -> bool:
+        return lobby.scheduled_for is not None and now >= lobby.scheduled_for
+
+    def _may_start(self, lobby: LobbyRow, now: datetime) -> bool:
+        """Spontaneous lobbies start at ten players; scheduled ones only once their time is up."""
+        return lobby.kind == "spontaneous" or self._time_reached(lobby, now)
+
+    def _needs_free_player(self, lobby: LobbyRow, now: datetime) -> bool:
+        """Signing up for a future scheduled lobby is fine while busy; anything imminent is not."""
+        return lobby.kind == "spontaneous" or lobby.status != OPEN or self._time_reached(lobby, now)
+
+    async def _drop_busy(self, lobby_id: int, roster: Sequence[EntryRow]) -> list[int]:
+        dropped = []
+        for entry in roster:
+            if await self.repo.busy_lobby_of(entry.player_id, lobby_id) is not None:
+                await self.repo.set_entry_status(
+                    lobby_id, entry.player_id, (SIGNED_UP, READY), "dropped"
+                )
+                dropped.append(entry.player_id)
+        return dropped
+
     async def _after_change(self, lobby_id: int, events: list[str]) -> LobbyUpdate:
         await self._reconcile(lobby_id, events)
         return LobbyUpdate(await self.snapshot(lobby_id), events)
@@ -365,7 +462,15 @@ class LobbyService:
         deadline = now + timedelta(seconds=self.params.ready_check_seconds)
 
         if lobby.status == OPEN:
-            starting = full and lobby.kind == "spontaneous"
+            starting = full and self._may_start(lobby, now)
+            if starting and lobby.kind == "scheduled":
+                # Someone already in another game cannot start this one: drop them and re-check.
+                dropped = await self._drop_busy(lobby_id, roster)
+                if dropped:
+                    events.append("dropped_busy")
+                    roster = self._roster(await self.repo.entries(lobby_id))
+                    ids = [e.player_id for e in roster]
+                    starting = len(roster) >= ROSTER_SIZE
             if starting and await self.repo.transition(
                 lobby_id,
                 [OPEN],

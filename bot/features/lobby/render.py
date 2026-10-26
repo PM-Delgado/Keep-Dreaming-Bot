@@ -84,11 +84,14 @@ def team_text(slots: list[SlotView]) -> str:
 
 def build_lobby_embed(snapshot: LobbySnapshot) -> discord.Embed:
     lobby = snapshot.lobby
-    embed = discord.Embed(
-        title=f"In-house #{lobby.id} · {STATUS_TEXT[lobby.status]}",
-        color=STATUS_COLOR[lobby.status],
-    )
     status = lobby.status
+    scheduled_open = lobby.kind == "scheduled" and status == OPEN
+    embed = discord.Embed(
+        title=f"In-house #{lobby.id} · {'Agendada' if scheduled_open else STATUS_TEXT[status]}",
+        color=STATUS_COLOR[status],
+    )
+    if lobby.note:
+        embed.add_field(name="Nota", value=discord.utils.escape_markdown(lobby.note), inline=False)
 
     if status in (OPEN, READY_CHECK):
         count = len(snapshot.roster)
@@ -96,7 +99,18 @@ def build_lobby_embed(snapshot: LobbySnapshot) -> discord.Embed:
         if snapshot.reserves:
             embed.add_field(name="Reservas", value=reserves_text(snapshot), inline=False)
 
-    if status == OPEN:
+    if scheduled_open and lobby.scheduled_for is not None:
+        stamp = int(lobby.scheduled_for.timestamp())
+        embed.description = (
+            f"Começa <t:{stamp}:F> (<t:{stamp}:R>). Carrega em **Entrar** para guardares lugar."
+        )
+        if lobby.reminder_stage >= 2:
+            embed.description += (
+                "\nA hora já passou: o ready-check começa assim que houver 10 jogadores."
+            )
+        else:
+            embed.description += "\nÀ hora marcada, com 10 jogadores, começa o ready-check."
+    elif status == OPEN:
         embed.description = "Carrega em **Entrar**. Com 10 jogadores começa o ready-check."
     elif status == READY_CHECK and lobby.ready_deadline is not None:
         stamp = int(lobby.ready_deadline.timestamp())
@@ -125,6 +139,56 @@ def _add_teams(embed: discord.Embed, snapshot: LobbySnapshot) -> None:
     embed.add_field(name=f"{SIDE_EMOJI['blue']} Azul", value=team_text(proposal.blue))
     embed.add_field(name=f"{SIDE_EMOJI['red']} Vermelho", value=team_text(proposal.red))
     embed.add_field(name="Equilíbrio", value=band_text(proposal), inline=False)
+
+
+def build_list_embed(
+    open_lobby: LobbySnapshot | None, scheduled: list[LobbySnapshot]
+) -> discord.Embed:
+    """/lobby list: the open spontaneous lobby and the upcoming scheduled ones."""
+    lines = []
+    if open_lobby is not None:
+        lobby = open_lobby.lobby
+        lines.append(
+            f"**#{lobby.id}** · {STATUS_TEXT[lobby.status]} · "
+            f"{len(open_lobby.roster)}/{ROSTER_SIZE} jogadores"
+        )
+    for snap in scheduled:
+        lobby = snap.lobby
+        stamp = int(lobby.scheduled_for.timestamp()) if lobby.scheduled_for else 0
+        note = f" · {discord.utils.escape_markdown(lobby.note)}" if lobby.note else ""
+        reserves = f" (+{len(snap.reserves)})" if snap.reserves else ""
+        lines.append(
+            f"**#{lobby.id}** · <t:{stamp}:F> (<t:{stamp}:R>) · "
+            f"{len(snap.roster)}/{ROSTER_SIZE}{reserves}{note}"
+        )
+    return discord.Embed(
+        title="Lobbies",
+        description="\n".join(lines) or "Não há lobbies abertas nem agendadas.",
+        color=discord.Color.blurple(),
+    )
+
+
+def scheduled_ping(snapshot: LobbySnapshot, event: str) -> tuple[str, list[EntryView]] | None:
+    """Text and recipients (real signed-up players) for a scheduled lobby's reminder/notice."""
+    recipients = [e for e in (*snapshot.roster, *snapshot.reserves) if not e.is_mock]
+    lobby = snapshot.lobby
+    if not recipients or lobby.scheduled_for is None:
+        return None
+    stamp = int(lobby.scheduled_for.timestamp())
+    count = len(snapshot.roster)
+    mentions = " ".join(f"<@{e.discord_id}>" for e in recipients)
+    if event == "reminder":
+        missing = f" Faltam {ROSTER_SIZE - count}." if count < ROSTER_SIZE else ""
+        return (
+            f"Lembrete: a in-house #{lobby.id} começa <t:{stamp}:R>. "
+            f"Inscritos: {count}/{ROSTER_SIZE}.{missing} {mentions}",
+            recipients,
+        )
+    return (
+        f"É hora da in-house #{lobby.id}, mas só há {count}/{ROSTER_SIZE} inscritos. "
+        f"Começa assim que houver 10 — chamem quem falta! {mentions}",
+        recipients,
+    )
 
 
 def ready_check_ping(snapshot: LobbySnapshot, restarted: bool) -> str | None:

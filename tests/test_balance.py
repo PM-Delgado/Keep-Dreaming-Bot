@@ -252,8 +252,8 @@ def test_being_off_role_makes_a_player_weaker_in_the_team_strength():
     assert role_strength(on, "MID", P) > role_strength(on, "TOP", P)
     team_on = [on, *roster([25] * 4, proficiency=prof("TOP", base=5))][:5]
     options = _options(team_on, P)
-    mid_on = next(o for o in options if o.roles[0] == ROLES.index("MID"))
-    top_off = next(o for o in options if o.roles[0] == ROLES.index("TOP"))
+    mid_on = next(o for o in options if o.players[ROLES.index("MID")] == 0)
+    top_off = next(o for o in options if o.players[ROLES.index("TOP")] == 0)
     assert mid_on.lane[ROLES.index("MID")] > top_off.lane[ROLES.index("TOP")]
 
 
