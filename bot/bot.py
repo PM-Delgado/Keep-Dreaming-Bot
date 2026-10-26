@@ -42,10 +42,18 @@ async def load_cogs():
             logger.info(f"✅ Loaded cog: {cog_name}")
 
 @bot.event
+async def setup_hook():
+    # Guild commands only appear after a sync; do it on startup for the configured server.
+    synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+    logger.info(f"✅ Synced {len(synced)} commands to Guild {GUILD_ID}: {[cmd.name for cmd in synced]}")
+
+@bot.event
 async def on_ready():
     logger.info(f"✅ Logged in as {bot.user}")
 
 async def main():
+    if not TOKEN:
+        raise RuntimeError("DISCORD_TOKEN is not set; see .env.example.")
     async with bot:
         await load_cogs()
         await bot.start(TOKEN)
