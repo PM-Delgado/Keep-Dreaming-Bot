@@ -34,6 +34,28 @@ class AccountRow:
         return f"{self.game_name}#{self.tag_line}"
 
 
+@dataclass(frozen=True)
+class StoredGame:
+    """One stored ranked Solo/Duo game, with the account (Riot ID) it was played on."""
+
+    match_id: str
+    riot_id: str
+    played_at: datetime
+    team_position: str | None
+    individual_position: str | None
+    win: bool
+    kills: int
+    deaths: int
+    assists: int
+    duration_s: int
+    early_surrender: bool
+    champion: str | None
+    cs: int | None
+    damage: int | None
+    gold: int | None
+    vision_score: int | None
+
+
 _COLUMNS = (
     "id, player_id, puuid, game_name, tag_line, platform, is_main, history_synced_at,"
     " linked_by, linked_at"
@@ -169,7 +191,8 @@ class RiotRepository:
         await self.db.conn.execute(
             "INSERT OR IGNORE INTO riot_role_games (riot_account_id, riot_match_id, played_at,"
             " team_position, individual_position, win, kills, deaths, assists, duration_s,"
-            " early_surrender, champion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " early_surrender, champion, cs, damage, gold, vision_score)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 account_id,
                 game.match_id,
@@ -183,6 +206,10 @@ class RiotRepository:
                 game.duration_s,
                 int(game.early_surrender),
                 game.champion,
+                game.cs,
+                game.damage,
+                game.gold,
+                game.vision_score,
             ),
         )
         await self.db.conn.commit()
@@ -203,6 +230,47 @@ class RiotRepository:
         ) as cur:
             row = await cur.fetchone()
         return row[0] if row else 0
+
+    async def recent_games(
+        self, player_id: int, limit: int, account_id: int | None = None
+    ) -> list["StoredGame"]:
+        """Newest stored games across the player's accounts (or one account), newest first."""
+        sql = (
+            "SELECT g.riot_match_id, a.game_name, a.tag_line, g.played_at, g.team_position,"
+            " g.individual_position, g.win, g.kills, g.deaths, g.assists, g.duration_s,"
+            " g.early_surrender, g.champion, g.cs, g.damage, g.gold, g.vision_score"
+            " FROM riot_role_games g JOIN riot_accounts a ON a.id = g.riot_account_id"
+            " WHERE a.player_id = ?"
+        )
+        args: list[Any] = [player_id]
+        if account_id is not None:
+            sql += " AND a.id = ?"
+            args.append(account_id)
+        sql += " ORDER BY g.played_at DESC, g.riot_match_id DESC LIMIT ?"
+        args.append(limit)
+        async with self.db.conn.execute(sql, args) as cur:
+            rows = await cur.fetchall()
+        return [
+            StoredGame(
+                match_id=r[0],
+                riot_id=f"{r[1]}#{r[2]}",
+                played_at=from_db(r[3]),
+                team_position=r[4],
+                individual_position=r[5],
+                win=bool(r[6]),
+                kills=r[7],
+                deaths=r[8],
+                assists=r[9],
+                duration_s=r[10],
+                early_surrender=bool(r[11]),
+                champion=r[12],
+                cs=r[13],
+                damage=r[14],
+                gold=r[15],
+                vision_score=r[16],
+            )
+            for r in rows
+        ]
 
     async def observations(
         self, player_id: int, now: datetime, window_days: int, per_account: int

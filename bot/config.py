@@ -24,6 +24,10 @@ class Settings:
     # Optional: without a key the Riot integration is disabled and everything works manually.
     riot_api_key: str | None = field(default=None, repr=False)
     riot_default_platform: str = "euw1"
+    # Lobbies. Mock players are fake players for testing on a server with too few real people;
+    # keep them off in production.
+    mock_players: bool = False
+    ready_check_seconds: int = 120
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -62,7 +66,23 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         admin_ids=admin_ids,
         riot_api_key=riot_api_key,
         riot_default_platform=riot_platform,
+        mock_players=env.get("ENABLE_MOCK_PLAYERS", "").strip().lower()
+        in ("1", "true", "yes", "on"),
+        ready_check_seconds=_parse_ready_seconds(env.get("READY_CHECK_SECONDS", "")),
     )
+
+
+def _parse_ready_seconds(raw: str) -> int:
+    raw = raw.strip()
+    if not raw:
+        return 120
+    try:
+        seconds = int(raw)
+    except ValueError:
+        raise ConfigError("READY_CHECK_SECONDS must be a whole number of seconds.") from None
+    if not 10 <= seconds <= 900:
+        raise ConfigError("READY_CHECK_SECONDS must be between 10 and 900.")
+    return seconds
 
 
 def _parse_admin_ids(raw: str) -> frozenset[int]:
@@ -79,3 +99,7 @@ def _parse_admin_ids(raw: str) -> frozenset[int]:
                 f"ADMIN_USER_IDS must be comma-separated numeric user IDs (got {part!r})."
             ) from None
     return frozenset(ids)
+
+
+def _truthy(raw: str) -> bool:
+    return raw.strip().lower() in ("1", "true", "yes", "on")

@@ -14,7 +14,10 @@ Private Discord bot for a friends' server.
 | `/profile roles role proficiency` | Your own 1-5 proficiency on a role (or clear it). |
 | `/profile rank tier [division]` | Self-reported League Solo/Duo rank; seeds the starting rating while you have few in-house games. |
 | `/riot link riot_id [platform] [player]` | Links a Riot account (Name#TAG). The first one becomes the main; its Solo/Duo rank seeds the rating while you have few in-house games. Admins can link for others (the channel is told, with the data notice). Needs `RIOT_API_KEY`. |
+| `/riot history [player] [riot_id]` | The last 10 ranked Solo/Duo games of a player (all their accounts, or one): result, champion, role, KDA, CS, duration, age. Reads what the last sync stored (no Riot requests), visible to the group. Formatting lives in `bot/features/riot/history.py` and `build_history_embed`. |
 | `/riot main`, `/riot unlink`, `/riot refresh`, `/riot list` | Change the main account, delete an account and all data tied to it (if it was the main, the earliest-linked remaining account becomes the main), refresh names/rank/ranked history (10 min cooldown for players), list the linked accounts (visible to everyone). |
+| `/lobby open`, `/lobby show`, `/lobby cancel` | Open the in-house lobby in this channel (one open lobby per server). A live message with buttons: **Entrar / Sair / Pronto / Recusar / Confirmar / Cancelar**. At 10 players a ready-check (default 2 min) starts; non-responders are replaced from the reserves; when all ten confirm, balanced teams are proposed (coarse balance label only). Players never choose roles: each is placed from their profile proficiency (best role, or next best when roles collide), strong players are matched against strong players in the same lane, and there is no reroll. Only the creator or an admin confirms or cancels. State is in SQLite and the buttons survive restarts. `/lobby show` re-posts a lost message. |
+| `/mock create|fill|ready|drop|list|clear` | Admin-only, and only with `ENABLE_MOCK_PLAYERS=true`: fake players to test lobbies alone. See `docs/testing-lobbies.md`. |
 | `/admin player register member [display_name]` | Allowlisted admins only: registers a server member in advance (identity = their Discord user ID; display name defaults to their current Discord name). Same defaults as `/register`; an already-registered member is left untouched. |
 | `/admin rating set|inspect|recompute|rank`, `/admin roles set` | Allowlisted admins only (`ADMIN_USER_IDS`): rating adjustments, diagnostics (the only place raw numbers appear), rank and proficiency overrides. |
 
@@ -34,6 +37,9 @@ bot/
     players/    roster + role proficiency; cog.py also wires the rating services and admin.py
     riot/       optional Riot module: client.py (HTTP, rate limit), roles.py (role experience), service.py,
                 repository.py, cog.py (/riot); plugs into the players/ratings services, never imported by them
+    balance/    pure team balancer (126 splits; role-dependent strength, lane matchups, star spread); no Discord/DB
+    lobby/      state machine + SQL (service.py, repository.py), render.py (messages), views.py (buttons),
+                cog.py (commands, sweeper), mock.py (test players)
     ratings/    pure rating core (no Discord): rank.py R, matchmaking.py E, ladder.py, engine.py
                 (the only openskill import), replay.py; service.py / repository.py
 tests/
@@ -44,7 +50,7 @@ New features go in `bot/features/<name>/` with a `cog.py` exposing `setup(bot)`,
 
 ## Data
 
-SQLite file at `DB_PATH` (default `data/kdbot.sqlite3`, git-ignored). Tables: `names`, `phrases`, `picks` (one row per day); Riot (optional, migration 3): `riot_accounts`, `riot_role_games`; in-house: `players`, `player_roles`, `rating_events` and `rank_signals` (authoritative inputs) and `ratings`, `rating_history` (caches rebuilt by replay). On first run, names and phrases are loaded from `bot/features/nameday/seed/*.json`. Schema changes are versioned in `bot/db.py` (`MIGRATIONS`). To back up, copy the `data/` folder while the bot is stopped. To reset the ranking, stop the bot and delete the `.sqlite3` file (and `-wal`/`-shm` files).
+SQLite file at `DB_PATH` (default `data/kdbot.sqlite3`, git-ignored). Tables: `names`, `phrases`, `picks` (one row per day); Lobbies (migrations 5-6): `lobbies`, `lobby_entries`; Riot (optional, migrations 3-4): `riot_accounts`, `riot_role_games`; in-house: `players`, `player_roles`, `rating_events` and `rank_signals` (authoritative inputs) and `ratings`, `rating_history` (caches rebuilt by replay). On first run, names and phrases are loaded from `bot/features/nameday/seed/*.json`. Schema changes are versioned in `bot/db.py` (`MIGRATIONS`). To back up, copy the `data/` folder while the bot is stopped. To reset the ranking, stop the bot and delete the `.sqlite3` file (and `-wal`/`-shm` files).
 
 ## Local setup
 
@@ -52,6 +58,7 @@ SQLite file at `DB_PATH` (default `data/kdbot.sqlite3`, git-ignored). Tables: `n
 2. `pip install -e ".[dev]"`
 3. Copy `.env.example` to `.env`; fill in `DISCORD_TOKEN` (Bot tab -> Reset Token) and `GUILD_ID`.
    Optionally set `RIOT_API_KEY` (and `RIOT_DEFAULT_PLATFORM`, default `euw1`) to enable `/riot`; see `docs/riot-policy.md` first.
+   Lobby options: `READY_CHECK_SECONDS` (default 120) and `ENABLE_MOCK_PLAYERS` (testing only).
    Optionally set `ADMIN_USER_IDS` (comma-separated Discord user IDs) to enable the admin commands; empty means nobody.
 4. Invite the bot with scopes `bot` + `applications.commands`. No privileged intents are needed.
 5. Run from the repo root: `python -m bot`

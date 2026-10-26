@@ -240,6 +240,7 @@ async def test_extension_plugs_into_the_core_and_is_removable():
             "main",
             "unlink",
             "list",
+            "history",
             "refresh",
         }
         for ext in EXTENSIONS:

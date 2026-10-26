@@ -64,7 +64,12 @@ class FakeRiot:
         duration: int = 1800,
         early: bool = False,
         individual: str | None = None,
+        champion: str = "Ahri",
+        win: bool = True,
+        kda: tuple[int, int, int] = (5, 3, 7),
+        stats: dict[str, Any] | None = None,
     ) -> None:
+        """`stats` adds raw participant fields (totalMinionsKilled, goldEarned, ...)."""
         stamp = int(when.timestamp() * 1000)
         self.match_ids.setdefault(puuid, []).insert(0, match_id)
         self.matches[match_id] = {
@@ -78,13 +83,14 @@ class FakeRiot:
                         "puuid": puuid,
                         "teamPosition": position or "",
                         "individualPosition": individual if individual is not None else position,
-                        "win": True,
-                        "kills": 5,
-                        "deaths": 3,
-                        "assists": 7,
+                        "win": win,
+                        "kills": kda[0],
+                        "deaths": kda[1],
+                        "assists": kda[2],
                         "timePlayed": duration,
-                        "championName": "Ahri",
+                        "championName": champion,
                         "gameEndedInEarlySurrender": early,
+                        **(stats or {}),
                     }
                 ],
             },

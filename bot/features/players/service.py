@@ -78,7 +78,11 @@ class PlayerService:
         self.account_labeler: Callable[[int], Awaitable[list[str]]] | None = None
 
     async def register(
-        self, discord_id: int, nickname: str, registered_by: int | None = None
+        self,
+        discord_id: int,
+        nickname: str,
+        registered_by: int | None = None,
+        is_mock: bool = False,
     ) -> Player:
         """Create the player and its default rating. Used by /register (self) and by the admin
         command (`registered_by` is then the admin, recorded on the seed event).
@@ -90,7 +94,7 @@ class PlayerService:
             raise AlreadyRegisteredError(existing)
         nickname = clean_nickname(nickname)
         try:
-            player = await self.repo.create(discord_id, nickname, self.clock())
+            player = await self.repo.create(discord_id, nickname, self.clock(), is_mock)
         except AlreadyRegistered:  # lost a race with another registration of the same user
             raise PlayerError("Já estás registado. Usa /profile view.") from None
         except NicknameTaken:
@@ -114,11 +118,10 @@ class PlayerService:
         await self.repo.set_admin_override(player.id, _check_role(role, value), value, self.clock())
         return player
 
-    async def profile(self, discord_id: int) -> Profile:
-        player = await self.require(discord_id)
-        inspection = await self.ratings.inspect(player.id)
-        stored_roles = await self.repo.roles(player.id)
-        estimates = await self.role_estimator(player.id) if self.role_estimator else {}
+    async def role_lines(self, player_id: int) -> list[RoleLine]:
+        """Effective proficiency per role: admin override > declared > Riot estimate > unknown."""
+        stored_roles = await self.repo.roles(player_id)
+        estimates = await self.role_estimator(player_id) if self.role_estimator else {}
         lines = []
         for role in ROLES:
             row = stored_roles.get(role)
@@ -132,6 +135,12 @@ class PlayerService:
                     ),
                 )
             )
+        return lines
+
+    async def profile(self, discord_id: int) -> Profile:
+        player = await self.require(discord_id)
+        inspection = await self.ratings.inspect(player.id)
+        lines = await self.role_lines(player.id)
         accounts = await self.account_labeler(player.id) if self.account_labeler else []
         return Profile(
             player,

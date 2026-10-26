@@ -154,6 +154,11 @@ class RankedGame:
     duration_s: int
     early_surrender: bool
     champion: str | None
+    # Extra per-game stats for the history view; None when Riot did not send them.
+    cs: int | None = None  # lane + jungle minions
+    damage: int | None = None  # damage dealt to champions
+    gold: int | None = None
+    vision_score: int | None = None
 
 
 class RiotClient:
@@ -297,6 +302,18 @@ def _parse_solo_rank(data: Any) -> SoloRank | None:
     return None  # a successful answer with no Solo/Duo entry: confirmed unranked
 
 
+def _optional_int(value: Any) -> int | None:
+    return int(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _cs(participant: Mapping[str, Any]) -> int | None:
+    lane = _optional_int(participant.get("totalMinionsKilled"))
+    jungle = _optional_int(participant.get("neutralMinionsKilled"))
+    if lane is None and jungle is None:
+        return None
+    return (lane or 0) + (jungle or 0)
+
+
 def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
     try:
         info = data["info"]
@@ -319,6 +336,10 @@ def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
             duration_s=duration,
             early_surrender=bool(me.get("gameEndedInEarlySurrender")),
             champion=me.get("championName"),
+            cs=_cs(me),
+            damage=_optional_int(me.get("totalDamageDealtToChampions")),
+            gold=_optional_int(me.get("goldEarned")),
+            vision_score=_optional_int(me.get("visionScore")),
         )
     except (KeyError, TypeError, ValueError, StopIteration) as exc:
         raise RiotUnavailable("unexpected match payload") from exc
