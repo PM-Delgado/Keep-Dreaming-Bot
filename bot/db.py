@@ -26,6 +26,117 @@ MIGRATIONS: list[str] = [
         picked_at TEXT NOT NULL          -- ISO timestamp with offset
     );
     """,
+    # 2: in-house roster, role proficiency, rating inputs (events, rank signals) and the
+    # rebuildable rating caches. `rating_events` and `rank_signals` are authoritative; `ratings`
+    # and `rating_history` can always be rebuilt by replay.
+    """
+    CREATE TABLE players (
+        id         INTEGER PRIMARY KEY,
+        discord_id INTEGER NOT NULL UNIQUE,
+        nickname   TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        created_at TEXT NOT NULL,
+        left_at    TEXT
+    );
+    CREATE TABLE player_roles (
+        player_id      INTEGER NOT NULL REFERENCES players(id),
+        role           TEXT NOT NULL CHECK (role IN ('TOP','JUNGLE','MID','ADC','SUPPORT')),
+        declared       INTEGER CHECK (declared BETWEEN 1 AND 5),
+        admin_override INTEGER CHECK (admin_override BETWEEN 1 AND 5),
+        updated_at     TEXT NOT NULL,
+        PRIMARY KEY (player_id, role)
+    );
+    CREATE TABLE rating_events (
+        id         INTEGER PRIMARY KEY,
+        player_id  INTEGER NOT NULL REFERENCES players(id),
+        kind       TEXT NOT NULL CHECK (kind IN ('seed','adjust')),
+        mu         REAL NOT NULL,
+        sigma      REAL NOT NULL,
+        source     TEXT NOT NULL CHECK (source IN ('riot','self_reported','default','admin')),
+        detail     TEXT,  -- never contains a Riot ID
+        created_at TEXT NOT NULL,
+        created_by INTEGER  -- Discord user ID of whoever triggered it
+    );
+    CREATE TABLE rank_signals (
+        id          INTEGER PRIMARY KEY,
+        player_id   INTEGER NOT NULL REFERENCES players(id),
+        source      TEXT NOT NULL CHECK (source IN ('riot','self_reported','admin')),
+        status      TEXT NOT NULL CHECK (status IN ('ranked','unranked','cleared')),
+        account_key TEXT,  -- puuid, riot source only; no FK (riot_accounts arrives later)
+        queue_type  TEXT,
+        tier        TEXT,
+        division    TEXT,
+        lp          INTEGER,
+        detail      TEXT,
+        created_at  TEXT NOT NULL,
+        created_by  INTEGER,
+        CHECK ((status = 'ranked') = (tier IS NOT NULL)),
+        CHECK (status != 'cleared' OR source = 'admin'),
+        CHECK (status != 'unranked' OR source = 'riot')
+    );
+    CREATE INDEX rank_signals_by_player ON rank_signals(player_id);
+    CREATE TABLE ratings (
+        player_id      INTEGER PRIMARY KEY REFERENCES players(id),
+        mu             REAL NOT NULL,
+        sigma          REAL NOT NULL,
+        games          INTEGER NOT NULL,
+        placed         INTEGER NOT NULL,
+        tier_key       TEXT,
+        division       INTEGER,
+        algo_version   TEXT NOT NULL,
+        ladder_version INTEGER NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
+    CREATE TABLE rating_history (
+        id             INTEGER PRIMARY KEY,
+        player_id      INTEGER NOT NULL REFERENCES players(id),
+        event_id       INTEGER REFERENCES rating_events(id),
+        match_id       INTEGER,  -- no FK: matches arrive in a later migration
+        mu_before      REAL,
+        sigma_before   REAL,
+        mu_after       REAL NOT NULL,
+        sigma_after    REAL NOT NULL,
+        placed         INTEGER NOT NULL,
+        tier_key       TEXT,
+        division       INTEGER,
+        algo_version   TEXT NOT NULL,
+        ladder_version INTEGER NOT NULL,
+        CHECK ((event_id IS NULL) != (match_id IS NULL))
+    );
+    CREATE INDEX rating_history_by_player ON rating_history(player_id);
+    """,
+    # 3: optional Riot integration. Unlinking an account deletes its row, its role games (cascade)
+    # and its Riot rank signals, so nothing references a removed puuid.
+    """
+    CREATE TABLE riot_accounts (
+        id                INTEGER PRIMARY KEY,
+        player_id         INTEGER NOT NULL REFERENCES players(id),
+        puuid             TEXT NOT NULL UNIQUE,
+        game_name         TEXT NOT NULL,
+        tag_line          TEXT NOT NULL,
+        platform          TEXT NOT NULL,
+        is_main           INTEGER NOT NULL DEFAULT 0 CHECK (is_main IN (0, 1)),
+        history_synced_at TEXT,
+        linked_by         INTEGER NOT NULL,  -- Discord user ID of whoever linked it
+        linked_at         TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX riot_accounts_one_main ON riot_accounts(player_id) WHERE is_main = 1;
+    CREATE INDEX riot_accounts_by_player ON riot_accounts(player_id);
+    CREATE TABLE riot_role_games (
+        riot_account_id     INTEGER NOT NULL REFERENCES riot_accounts(id) ON DELETE CASCADE,
+        riot_match_id       TEXT NOT NULL,
+        played_at           TEXT NOT NULL,
+        team_position       TEXT,
+        individual_position TEXT,
+        win                 INTEGER NOT NULL,
+        kills               INTEGER NOT NULL,
+        deaths              INTEGER NOT NULL,
+        assists             INTEGER NOT NULL,
+        duration_s          INTEGER NOT NULL,
+        early_surrender     INTEGER NOT NULL DEFAULT 0,
+        champion            TEXT,
+        PRIMARY KEY (riot_account_id, riot_match_id)
+    );
+    """,
 ]
 
 
