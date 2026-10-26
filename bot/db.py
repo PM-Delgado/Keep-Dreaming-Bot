@@ -192,6 +192,12 @@ MIGRATIONS: list[str] = [
     """
     DROP TABLE lobby_entry_roles;
     """,
+    # 7: scheduled lobbies (M2b). `reminder_stage` makes reminders idempotent across restarts:
+    # 0 = nothing sent, 1 = the "starts in 30 min" reminder, 2 = the "time is up" notice.
+    """
+    ALTER TABLE lobbies ADD COLUMN reminder_stage INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE lobbies ADD COLUMN note TEXT;
+    """,
 ]
 
 

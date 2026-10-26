@@ -97,8 +97,12 @@ class MockPlayers:
         """Put `count` mock players into the lobby, creating more mocks if needed."""
         self._require_enabled()
         free = []
+        already_in = {
+            e.player_id for e in await self.lobbies.repo.entries(lobby_id) if e.status != "dropped"
+        }
         for player in await self.players.repo.list_mock():
-            if await self.lobbies.repo.active_lobby_of(player.id) is None:
+            busy = await self.lobbies.repo.busy_lobby_of(player.id, lobby_id)
+            if busy is None and player.id not in already_in:
                 free.append(player)
         if len(free) < count:
             free += await self.create(count - len(free), admin_id)

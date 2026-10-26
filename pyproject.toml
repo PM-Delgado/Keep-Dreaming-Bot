@@ -38,5 +38,6 @@ typeCheckingMode = "standard"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["slow: runs many simulated lobbies (about 0.3 s each); skip with -m \"not slow\""]
 # discord.py (3.13) calls re.sub with a positional count; not ours to fix.
 filterwarnings = ["ignore:.count. is passed as positional argument:DeprecationWarning"]

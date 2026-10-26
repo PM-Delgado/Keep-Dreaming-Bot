@@ -62,6 +62,11 @@ and are marked with 🤖 in lobby messages. You must be registered yourself: `/r
 | Permissions | A non-admin, non-creator account presses **Confirmar**/**Cancelar** | Refused with an explanation |
 | Restart | Restart the bot mid-lobby, then press a button on the old message | It still works (state is in the database; buttons are persistent) |
 | Lost message | `/lobby show` | The lobby is re-posted and the old copy removed |
+| Scheduled lobby | `/lobby schedule when:<a few minutes ahead> note:teste`, then `/mock fill lobby:<n>` | Message titled "Agendada" with the time; ten sign-ups wait; at the time the ready-check starts |
+| Reminder | Schedule 31 min ahead and wait one minute | A reminder pinging real signed-up players (never mocks); sent once, also after a restart |
+| Too few at the time | Schedule, sign up fewer than ten, wait for the time | A one-off "só há N/10" notice; the tenth sign-up afterwards starts the ready-check at once |
+| Busy player | Be in a running game and let a scheduled lobby you signed up for reach its time | You are dropped from the scheduled one |
+| Several lobbies | `/lobby open`, `/lobby schedule`, then `/lobby list` | Both are listed; `/lobby show lobby:<n>` and `/lobby cancel lobby:<n>` pick one |
 
 To change a player's roles for a test, use `/profile roles` (yourself) or `/admin roles set`.
 
@@ -71,6 +76,10 @@ To change a player's roles for a test, use `/profile roles` (yourself) or `/admi
   entries). It refuses while any of them is in an unfinished lobby, so cancel lobbies first. Real
   players are never touched.
 * Do not leave mock players in a database you care about.
+
+## Matchmaking without Discord
+
+`python -m bot.features.simulation scenario all` runs the balancer on fixed rosters (five junglers, two Masters who both play mid, a Master among Golds, ...) and checks the expectations; `population --style realistic --lobbies 200` and `league --players 20 --lobbies 150` run many random lobbies. Use `pytest -m "not slow"` to skip the long simulations.
 
 ## What these tests do not cover
 

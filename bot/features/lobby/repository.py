@@ -45,6 +45,8 @@ class LobbyRow:
     updated_at: datetime
     closed_at: datetime | None
     cancel_reason: str | None
+    reminder_stage: int
+    note: str | None
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,8 @@ class EntryRow:
 
 _COLUMNS = (
     "id, guild_id, channel_id, message_id, kind, status, scheduled_for, ready_deadline,"
-    " roster_json, proposal_json, created_by, created_at, updated_at, closed_at, cancel_reason"
+    " roster_json, proposal_json, created_by, created_at, updated_at, closed_at, cancel_reason,"
+    " reminder_stage, note"
 )
 
 
@@ -82,6 +85,8 @@ def _lobby(r: Sequence[Any]) -> LobbyRow:
         from_db(r[12]),
         _opt(r[13]),
         r[14],
+        r[15],
+        r[16],
     )
 
 
@@ -109,11 +114,13 @@ class LobbyRepository:
         created_by: int,
         now: datetime,
         scheduled_for: datetime | None = None,
+        note: str | None = None,
     ) -> LobbyRow:
         try:
             cur = await self.db.conn.execute(
                 "INSERT INTO lobbies (guild_id, channel_id, kind, status, scheduled_for,"
-                " created_by, created_at, updated_at) VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?)",
+                " created_by, created_at, updated_at, note)"
+                " VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)",
                 (
                     guild_id,
                     channel_id,
@@ -122,6 +129,7 @@ class LobbyRepository:
                     created_by,
                     to_db(now),
                     to_db(now),
+                    note,
                 ),
             )
         except sqlite3.IntegrityError as exc:
@@ -155,6 +163,24 @@ class LobbyRepository:
         ) as cur:
             row = await cur.fetchone()
         return _lobby(row) if row else None
+
+    async def list_scheduled(self, guild_id: int) -> list[LobbyRow]:
+        """Scheduled lobbies still waiting for their time (or for enough players), soonest first."""
+        async with self.db.conn.execute(
+            f"SELECT {_COLUMNS} FROM lobbies WHERE guild_id = ? AND kind = 'scheduled'"
+            " AND status = 'OPEN' ORDER BY scheduled_for, id",
+            (guild_id,),
+        ) as cur:
+            return [_lobby(r) for r in await cur.fetchall()]
+
+    async def set_reminder_stage(self, lobby_id: int, stage: int) -> bool:
+        """Compare-and-set: True only for the caller that moves the stage forward."""
+        cur = await self.db.conn.execute(
+            "UPDATE lobbies SET reminder_stage = ? WHERE id = ? AND reminder_stage < ?",
+            (stage, lobby_id, stage),
+        )
+        await self.db.conn.commit()
+        return cur.rowcount == 1
 
     async def list_by_status(self, statuses: Sequence[str]) -> list[LobbyRow]:
         marks = ",".join("?" * len(statuses))
@@ -245,6 +271,22 @@ class LobbyRepository:
             (lobby_id,),
         )
         await self.db.conn.commit()
+
+    async def busy_lobby_of(self, player_id: int, exclude_lobby_id: int | None = None):
+        """A lobby that stops the player from joining another right now: a game in progress
+        (ready-check, proposed teams, started) or an open spontaneous lobby. Sign-ups to
+        scheduled lobbies that have not started do not count."""
+        async with self.db.conn.execute(
+            f"SELECT {', '.join('l.' + c.strip() for c in _COLUMNS.split(','))}"
+            " FROM lobbies l JOIN lobby_entries e ON e.lobby_id = l.id"
+            " WHERE e.player_id = ? AND e.status != 'dropped' AND l.id != ? AND ("
+            " l.status IN ('READY_CHECK', 'TEAMS_PROPOSED', 'IN_PROGRESS')"
+            " OR (l.status = 'OPEN' AND l.kind = 'spontaneous'))"
+            " ORDER BY l.id DESC LIMIT 1",
+            (player_id, exclude_lobby_id or 0),
+        ) as cur:
+            row = await cur.fetchone()
+        return _lobby(row) if row else None
 
     async def active_lobby_of(self, player_id: int) -> LobbyRow | None:
         """The lobby (if any) in which the player is signed up and that has not finished."""
