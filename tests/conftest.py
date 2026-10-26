@@ -1,7 +1,19 @@
-import os
+from collections.abc import AsyncIterator
 
-# Must be set before importing the bot package (it reads the environment at import time).
-# Real environment values / .env are never needed for tests.
-os.environ["GUILD_ID"] = "123456789012345678"
-os.environ["DISCORD_TOKEN"] = "test-token"
-os.environ["ASSETS_URL"] = "https://example.invalid/assets/"
+import pytest_asyncio
+
+from bot.db import Database
+from bot.features.nameday.repository import NameDayRepository
+
+
+@pytest_asyncio.fixture
+async def db() -> AsyncIterator[Database]:
+    database = Database(":memory:")
+    await database.connect()
+    yield database
+    await database.close()
+
+
+@pytest_asyncio.fixture
+async def repo(db: Database) -> NameDayRepository:
+    return NameDayRepository(db)

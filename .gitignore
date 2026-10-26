@@ -5,15 +5,15 @@ __pycache__/
 # Environment variables
 .env
 
-# VSCode settings
+# Editor / local tooling
 .vscode/
-
-# Folders and files
-aws_connect.bat
-lavalink/plugins
-lavalink/logs
-lavalink/Lavalink.jar
-# Local development
 .venv/
-dev_data/
 .pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Runtime data (SQLite database)
+data/
+
+# Personal scripts
+aws_connect.bat

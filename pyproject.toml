@@ -1,0 +1,38 @@
+[project]
+name = "keep-dreaming-bot"
+version = "0.2.0"
+description = "Private Discord bot for a friends' server."
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.4",
+    "python-dotenv>=1.0",
+    "aiosqlite>=0.20",
+    "tzdata",  # IANA timezone data for zoneinfo on Windows
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff", "pyright"]
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
+
+[tool.setuptools.package-data]
+"bot.features.nameday" = ["seed/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM"]
+
+[tool.pyright]
+include = ["bot", "tests"]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
