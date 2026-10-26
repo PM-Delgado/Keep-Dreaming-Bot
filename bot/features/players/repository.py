@@ -25,6 +25,7 @@ class Player:
     nickname: str
     created_at: datetime
     left_at: datetime | None
+    is_mock: bool = False  # a fake player for testing lobbies; never a real Discord user
 
 
 @dataclass(frozen=True)
@@ -33,22 +34,27 @@ class RoleRow:
     admin_override: int | None
 
 
-_COLUMNS = "id, discord_id, nickname, created_at, left_at"
+_COLUMNS = "id, discord_id, nickname, created_at, left_at, is_mock"
 
 
 def _player(row: Sequence[Any]) -> Player:
-    return Player(row[0], row[1], row[2], from_db(row[3]), from_db(row[4]) if row[4] else None)
+    return Player(
+        row[0], row[1], row[2], from_db(row[3]), from_db(row[4]) if row[4] else None, bool(row[5])
+    )
 
 
 class PlayerRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def create(self, discord_id: int, nickname: str, created_at: datetime) -> Player:
+    async def create(
+        self, discord_id: int, nickname: str, created_at: datetime, is_mock: bool = False
+    ) -> Player:
         try:
             cur = await self.db.conn.execute(
-                "INSERT INTO players (discord_id, nickname, created_at) VALUES (?, ?, ?)",
-                (discord_id, nickname, to_db(created_at)),
+                "INSERT INTO players (discord_id, nickname, created_at, is_mock)"
+                " VALUES (?, ?, ?, ?)",
+                (discord_id, nickname, to_db(created_at), int(is_mock)),
             )
         except sqlite3.IntegrityError as exc:
             await self.db.conn.rollback()
@@ -66,6 +72,44 @@ class PlayerRepository:
         ) as cur:
             row = await cur.fetchone()
         return _player(row) if row else None
+
+    async def get_many(self, player_ids: Sequence[int]) -> dict[int, Player]:
+        if not player_ids:
+            return {}
+        marks = ",".join("?" * len(player_ids))
+        async with self.db.conn.execute(
+            f"SELECT {_COLUMNS} FROM players WHERE id IN ({marks})", tuple(player_ids)
+        ) as cur:
+            return {r[0]: _player(r) for r in await cur.fetchall()}
+
+    async def list_mock(self) -> list[Player]:
+        async with self.db.conn.execute(
+            f"SELECT {_COLUMNS} FROM players WHERE is_mock = 1 ORDER BY id"
+        ) as cur:
+            return [_player(r) for r in await cur.fetchall()]
+
+    async def delete_mock_players(self) -> int:
+        """Remove every mock player and the rows that hang off them. Real players are untouched.
+
+        Callers must first make sure no active lobby contains a mock (see MockPlayers.clear).
+        """
+        mock = "(SELECT id FROM players WHERE is_mock = 1)"
+        conn = self.db.conn
+        async with conn.execute("SELECT COUNT(*) FROM players WHERE is_mock = 1") as cur:
+            row = await cur.fetchone()
+        count = row[0] if row else 0
+        for table in (
+            "lobby_entries",
+            "rating_history",
+            "rating_events",
+            "rank_signals",
+            "ratings",
+            "player_roles",
+        ):
+            await conn.execute(f"DELETE FROM {table} WHERE player_id IN {mock}")
+        await conn.execute("DELETE FROM players WHERE is_mock = 1")
+        await conn.commit()
+        return count
 
     async def get_by_discord(self, discord_id: int) -> Player | None:
         async with self.db.conn.execute(

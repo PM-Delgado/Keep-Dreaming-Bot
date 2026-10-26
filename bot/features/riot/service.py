@@ -21,7 +21,12 @@ from bot.features.riot.client import (
     SoloRank,
 )
 from bot.features.riot.platforms import normalise_platform
-from bot.features.riot.repository import AccountRow, PuuidAlreadyLinked, RiotRepository
+from bot.features.riot.repository import (
+    AccountRow,
+    PuuidAlreadyLinked,
+    RiotRepository,
+    StoredGame,
+)
 from bot.features.riot.roles import (
     RoleHistoryParams,
     estimate_proficiency,
@@ -36,7 +41,8 @@ CONSENT_NOTICE = (
     "Solo/Duo de todas as contas ligadas (role, resultado, KDA, campeão, duração).\n"
     "• **Para que serve:** rating inicial in-house, estimativa de rank para o matchmaking e "
     "estimativa de experiência por role. Não são usados jogos custom da Riot.\n"
-    "• **Visibilidade:** os nomes das contas ligadas são visíveis a todos os membros deste "
+    "• **Visibilidade:** os nomes das contas ligadas e os teus últimos jogos ranked Solo/Duo "
+    "(campeão, resultado, KDA, ...; /riot history) são visíveis a todos os membros deste "
     "servidor.\n"
     "• Isto é consentimento para o uso dos dados, **não** prova de que a conta é tua.\n"
     "• Podes remover tudo a qualquer momento com /riot unlink."
@@ -81,6 +87,18 @@ class LinkResult:
     account: AccountRow
     is_main: bool
     rank: RankOutcome | None  # only the main account is looked up
+
+
+HISTORY_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class HistoryView:
+    nickname: str
+    games: list[StoredGame]
+    last_synced: datetime | None  # the oldest sync among the accounts shown; None = unfinished
+    account: AccountRow | None  # set when one account was asked for
+    multiple_accounts: bool  # games come from several accounts: show which one each is from
 
 
 @dataclass(frozen=True)
@@ -216,6 +234,41 @@ class RiotService:
             f"{a.riot_id} ({a.platform.upper()}){' ★' if a.is_main else ''}"
             for a in await self.repo.list_accounts(player_id)
         ]
+
+    async def recent_history(
+        self, discord_id: int, limit: int = HISTORY_LIMIT, riot_id: str | None = None
+    ) -> "HistoryView":
+        """The newest stored ranked Solo/Duo games of a player (all accounts, or one).
+
+        Reads what the last sync stored, so it costs no Riot requests and works without a key.
+        """
+        player = await self.players.require(discord_id)
+        accounts = await self.repo.list_accounts(player.id)
+        if not accounts:
+            raise PlayerError("Este jogador não tem contas ligadas.")
+        chosen: AccountRow | None = None
+        if riot_id is not None:
+            wanted = riot_id.strip().casefold()
+            chosen = next((a for a in accounts if a.riot_id.casefold() == wanted), None)
+            if chosen is None:
+                raise PlayerError("Essa conta não está ligada a este jogador.")
+        relevant = [chosen] if chosen else accounts
+        games = await self.repo.recent_games(player.id, limit, chosen.id if chosen else None)
+        if not games:
+            if any(a.history_synced_at is None for a in relevant):
+                raise PlayerError(
+                    "O histórico ainda está a sincronizar. Tenta daqui a uns minutos."
+                )
+            raise PlayerError("Não há jogos ranked Solo/Duo guardados nos últimos 12 meses.")
+        synced = [a.history_synced_at for a in relevant]
+        oldest_sync = None if any(s is None for s in synced) else min(s for s in synced if s)
+        return HistoryView(
+            nickname=player.nickname,
+            games=games,
+            last_synced=oldest_sync,
+            account=chosen,
+            multiple_accounts=len(accounts) > 1 and chosen is None,
+        )
 
     async def main_puuid_of(self, player_id: int) -> str | None:
         return await self.repo.main_puuid(player_id)

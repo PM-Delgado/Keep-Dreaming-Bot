@@ -15,9 +15,16 @@ from discord.ext import commands
 from bot.features.players.service import PlayerError
 from bot.features.ratings.service import RatingError
 from bot.features.riot.client import RiotClient
+from bot.features.riot.history import format_ago, format_line, format_summary, summarize, to_entry
 from bot.features.riot.platforms import PLATFORMS
 from bot.features.riot.repository import AccountRow, RiotRepository
-from bot.features.riot.service import CONSENT_NOTICE, LinkResult, RankOutcome, RiotService
+from bot.features.riot.service import (
+    CONSENT_NOTICE,
+    HistoryView,
+    LinkResult,
+    RankOutcome,
+    RiotService,
+)
 from bot.permissions import is_admin
 
 if TYPE_CHECKING:
@@ -67,6 +74,27 @@ def build_list_embed(
         color=discord.Color.dark_teal(),
     )
     embed.set_footer(text="★ = conta principal (usada para o rank de referência).")
+    return embed
+
+
+def build_history_embed(view: HistoryView, now: datetime) -> discord.Embed:
+    """Presentation of /riot history. Restyle here; the numbers come from history.py."""
+    entries = [to_entry(g) for g in view.games]
+    lines = [format_line(e, now, show_account=view.multiple_accounts) for e in entries]
+    scope = f" ({view.account.riot_id})" if view.account else ""
+    embed = discord.Embed(
+        title=f"Últimos {len(entries)} jogos ranked Solo/Duo de {view.nickname}{scope}",
+        description=f"{format_summary(summarize(entries))}\n\n" + "\n".join(lines),
+        color=discord.Color.blurple(),
+    )
+    if view.last_synced is None:
+        footer = "O histórico ainda está a sincronizar; pode estar incompleto."
+    else:
+        footer = (
+            f"Guardado no último sync ({format_ago(view.last_synced, now)}). "
+            "Usa /riot refresh para atualizar."
+        )
+    embed.set_footer(text=footer)
     return embed
 
 
@@ -198,6 +226,46 @@ class Riot(commands.Cog):
             return
         await interaction.response.send_message(
             embed=build_list_embed(profile_player.nickname, rows, datetime.now(UTC)),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def _history_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Accounts are public, so anyone may pick any player's account here."""
+        raw = getattr(interaction.namespace, "player", None)
+        target = int(getattr(raw, "id", raw)) if raw is not None else interaction.user.id
+        try:
+            rows = await self.service.accounts(target)
+        except PlayerError:
+            return []
+        wanted = current.casefold()
+        return [
+            app_commands.Choice(name=a.riot_id, value=a.riot_id)
+            for a, _ in rows
+            if wanted in a.riot_id.casefold()
+        ][:25]
+
+    @riot.command(name="history", description="Mostra os últimos jogos ranked Solo/Duo.")
+    @app_commands.describe(
+        player="O jogador (por defeito, tu).",
+        riot_id="Só os jogos desta conta (por defeito, todas as contas).",
+    )
+    @app_commands.autocomplete(riot_id=_history_autocomplete)
+    async def history(
+        self,
+        interaction: discord.Interaction,
+        player: discord.Member | None = None,
+        riot_id: str | None = None,
+    ) -> None:
+        target = player or interaction.user
+        try:
+            view = await self.service.recent_history(target.id, riot_id=riot_id)
+        except (PlayerError, RatingError) as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        await interaction.response.send_message(
+            embed=build_history_embed(view, datetime.now(UTC)),
             allowed_mentions=discord.AllowedMentions.none(),
         )
 

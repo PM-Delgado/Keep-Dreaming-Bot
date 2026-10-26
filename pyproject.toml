@@ -38,3 +38,5 @@ typeCheckingMode = "standard"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# discord.py (3.13) calls re.sub with a positional count; not ours to fix.
+filterwarnings = ["ignore:.count. is passed as positional argument:DeprecationWarning"]

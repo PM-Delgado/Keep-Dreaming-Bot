@@ -137,6 +137,61 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (riot_account_id, riot_match_id)
     );
     """,
+    # 4: extra per-game stats for /riot history. Games stored before this have NULLs.
+    """
+    ALTER TABLE riot_role_games ADD COLUMN cs INTEGER;
+    ALTER TABLE riot_role_games ADD COLUMN damage INTEGER;
+    ALTER TABLE riot_role_games ADD COLUMN gold INTEGER;
+    ALTER TABLE riot_role_games ADD COLUMN vision_score INTEGER;
+    """,
+    # 5: lobbies (M2). Operational state, not history: every transition is a compare-and-set
+    # UPDATE, and the one-open-lobby rule is a partial unique index. `is_mock` marks the fake
+    # players used to test lobbies on a server with too few real people.
+    """
+    ALTER TABLE players ADD COLUMN is_mock INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE lobbies (
+        id             INTEGER PRIMARY KEY,
+        guild_id       INTEGER NOT NULL,
+        channel_id     INTEGER NOT NULL,
+        message_id     INTEGER,
+        kind           TEXT NOT NULL CHECK (kind IN ('spontaneous', 'scheduled')),
+        status         TEXT NOT NULL CHECK (status IN
+                       ('OPEN', 'READY_CHECK', 'TEAMS_PROPOSED', 'IN_PROGRESS', 'CANCELLED',
+                        'COMPLETED')),
+        scheduled_for  TEXT,
+        ready_deadline TEXT,
+        roster_json    TEXT,  -- player ids of the current roster (first ten sign-ups)
+        proposal_json  TEXT,  -- the team proposal being shown or confirmed
+        created_by     INTEGER NOT NULL,  -- Discord user ID
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        closed_at      TEXT,
+        cancel_reason  TEXT
+    );
+    CREATE UNIQUE INDEX lobbies_one_open_spontaneous ON lobbies(guild_id)
+        WHERE kind = 'spontaneous' AND status IN ('OPEN', 'READY_CHECK', 'TEAMS_PROPOSED');
+    CREATE UNIQUE INDEX lobbies_by_message ON lobbies(message_id) WHERE message_id IS NOT NULL;
+    CREATE TABLE lobby_entries (
+        lobby_id  INTEGER NOT NULL REFERENCES lobbies(id),
+        player_id INTEGER NOT NULL REFERENCES players(id),
+        status    TEXT NOT NULL CHECK (status IN ('signed_up', 'ready', 'dropped')),
+        joined_at TEXT NOT NULL,
+        PRIMARY KEY (lobby_id, player_id)
+    );
+    CREATE TABLE lobby_entry_roles (
+        lobby_id  INTEGER NOT NULL,
+        player_id INTEGER NOT NULL,
+        role      TEXT NOT NULL CHECK (role IN ('TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT')),
+        pref      TEXT NOT NULL CHECK (pref IN ('prefer', 'ok', 'avoid', 'no')),
+        PRIMARY KEY (lobby_id, player_id, role),
+        FOREIGN KEY (lobby_id, player_id) REFERENCES lobby_entries(lobby_id, player_id)
+    );
+    """,
+    # 6: players never choose roles per lobby (roles come from their profile proficiency), so
+    # the per-lobby preference table from migration 5 is not needed.
+    """
+    DROP TABLE lobby_entry_roles;
+    """,
 ]
 
 

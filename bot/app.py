@@ -16,6 +16,7 @@ EXTENSIONS = (
     "bot.features.admin.cog",
     "bot.features.players.cog",
     "bot.features.riot.cog",  # optional; must load after players (plugs into its services)
+    "bot.features.lobby.cog",  # must load after players
 )
 
 
