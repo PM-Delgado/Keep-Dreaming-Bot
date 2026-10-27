@@ -776,6 +776,10 @@ async def setup(bot: "KDBot") -> None:
         settings.mock_players,
     )
     icons_cog = bot.get_cog("Icons")
-    await bot.add_cog(Lobby(bot, service, mock, getattr(icons_cog, "roles", None)))
+    cog = Lobby(bot, service, mock, getattr(icons_cog, "roles", None))
+    await bot.add_cog(cog)
     if settings.mock_players:
         log.warning("ENABLE_MOCK_PLAYERS is on: /mock commands are available (testing only).")
+    else:
+        # Not just refused when used: the group is left out of the command list, so nobody sees it.
+        bot.tree.remove_command(cog.mock_group.name)
