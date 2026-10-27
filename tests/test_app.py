@@ -7,7 +7,6 @@ from bot.features.nameday.cog import build_leaderboard_embed
 ENV = {
     "DISCORD_TOKEN": "t",
     "GUILD_ID": "123",
-    "ASSETS_URL": "https://x.invalid/a/",
     "DB_PATH": ":memory:",
 }
 
@@ -50,7 +49,7 @@ async def test_registers_exactly_the_expected_commands():
 
 
 def test_leaderboard_embed_handles_fewer_than_three():
-    embed = build_leaderboard_embed([("Ana", 2)], "https://x.invalid/a/")
+    embed = build_leaderboard_embed([("Ana", 2)])
     assert [f.name for f in embed.fields] == ["🥈 —", "🥇 Ana", "🏅 —"]
     assert isinstance(embed, discord.Embed)
 

@@ -23,7 +23,6 @@ from bot.features.stats.service import Breakdown, Kda, PlayerStats, StatsService
 ENV = {
     "DISCORD_TOKEN": "t",
     "GUILD_ID": "123",
-    "ASSETS_URL": "https://x.invalid/a/",
     "DB_PATH": ":memory:",
     "ADMIN_USER_IDS": "99",
 }

@@ -18,7 +18,6 @@ class ConfigError(RuntimeError):
 class Settings:
     token: str
     guild_id: int
-    assets_url: str
     db_path: Path
     admin_ids: frozenset[int] = frozenset()  # Discord user IDs allowed to run admin-only commands
     # Optional: without a key the Riot integration is disabled and everything works manually.
@@ -51,12 +50,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     except ValueError:
         raise ConfigError("GUILD_ID is missing or not a number; see .env.example.") from None
 
-    assets_url = env.get("ASSETS_URL", "").strip()
-    if not assets_url:
-        raise ConfigError("ASSETS_URL is not set; see .env.example.")
-    if not assets_url.endswith("/"):
-        assets_url += "/"
-
     admin_ids = _parse_admin_ids(env.get("ADMIN_USER_IDS", ""))
     riot_api_key = env.get("RIOT_API_KEY", "").strip() or None
     try:
@@ -67,7 +60,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         token=token,
         guild_id=guild_id,
-        assets_url=assets_url,
         db_path=Path(env.get("DB_PATH", "data/kdbot.sqlite3")),
         admin_ids=admin_ids,
         riot_api_key=riot_api_key,

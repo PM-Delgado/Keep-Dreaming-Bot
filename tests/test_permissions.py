@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from bot.config import load_settings
 from bot.permissions import _admin_predicate, is_admin
 
-ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1", "ASSETS_URL": "https://x.invalid/a"}
+ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1"}
 
 
 def interaction(settings, user_id):

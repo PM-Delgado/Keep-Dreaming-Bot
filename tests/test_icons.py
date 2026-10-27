@@ -20,7 +20,7 @@ from bot.features.icons.roles import (
 from bot.features.icons.upload import IconUploadError
 from bot.features.players.proficiency import ROLES
 
-ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1", "ASSETS_URL": "https://x.invalid/a/"}
+ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1"}
 
 
 class Uploads:
@@ -39,6 +39,11 @@ class Uploads:
 
 def service(db, **kwargs) -> RoleIconService:
     return RoleIconService(RoleEmojiRepository(db), **kwargs)
+
+
+def live(uploads: Uploads) -> dict[str, int]:
+    """The application's emojis after these uploads (what Discord would list)."""
+    return {name: 501 + i for i, name in enumerate(uploads.names)}
 
 
 # --- the bundled files ----
@@ -83,7 +88,7 @@ async def test_sync_uploads_each_role_once_from_the_bundled_files(db):
     assert all(image[:4] == b"\x89PNG" for image in uploads.images)
     markup = icons.markup()
     assert set(markup) == set(ROLES) and markup["TOP"] == "<:role_top:501>"
-    assert await icons.sync({}, uploads) == 0  # nothing left to do
+    assert await icons.sync(live(uploads), uploads) == 0  # nothing left to do
     assert len(uploads.names) == 5
 
 
@@ -103,11 +108,24 @@ async def test_sync_adopts_emojis_that_already_exist(db):
     assert icons.markup()["TOP"] == "<:role_top:77>"
 
 
+async def test_icons_saved_for_another_application_are_replaced(db):
+    icons = service(db)
+    for i, role in enumerate(ROLES):  # the ids of a development bot, unknown to this one
+        await icons.repo.save(role, 9_000 + i, emoji_name(role))
+    uploads = Uploads()
+    assert await icons.sync({"role_top": 77}, uploads) == 4
+    assert "role_top" not in uploads.names  # adopted by name instead
+    markup = icons.markup()
+    assert markup["TOP"] == "<:role_top:77>"
+    assert markup["JUNGLE"].startswith("<:role_jungle:5")  # a fresh upload, not the old id
+
+
 async def test_sync_skips_a_failing_role_and_the_next_run_finishes(db):
     icons = service(db)
-    assert await icons.sync({}, Uploads(fail={"role_mid"})) == 4
+    first = Uploads(fail={"role_mid"})
+    assert await icons.sync({}, first) == 4
     assert "MID" not in icons.markup()
-    assert await icons.sync({}, Uploads()) == 1
+    assert await icons.sync(live(first), Uploads()) == 1
     assert set(icons.markup()) == set(ROLES)
 
 

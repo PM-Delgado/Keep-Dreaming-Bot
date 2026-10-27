@@ -2,6 +2,7 @@
 
 import datetime as dt
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import discord
@@ -19,19 +20,30 @@ log = logging.getLogger(__name__)
 FOOTER = "Bada Bing! - Route 17, Lodi, New Jersey"
 PLACEHOLDER = ("—", 0)
 
+# The two images live in the repository and are sent with the message (an embed can show an
+# attached file as `attachment://name`), so no web address has to host them.
+ASSETS_DIR = Path(__file__).resolve().parents[3] / "assets"
+THUMBNAIL = "name_thumbnail.jpg"
+IMAGE = "name_image.jpg"
 
-def build_name_embed(pick: Pick, assets_url: str) -> discord.Embed:
+
+def asset_file(name: str) -> discord.File:
+    """A fresh attachment for one of the bundled images (a File can only be sent once)."""
+    return discord.File(ASSETS_DIR / name, filename=name)
+
+
+def build_name_embed(pick: Pick) -> discord.Embed:
     embed = discord.Embed(
         title=f"💃🏻 Puta do Dia: **{pick.name.upper()}**",
         description=pick.phrase,
         color=discord.Color.red(),
     )
-    embed.set_thumbnail(url=assets_url + "name_thumbnail.jpg")
+    embed.set_thumbnail(url=f"attachment://{THUMBNAIL}")
     embed.set_footer(text=FOOTER)
     return embed
 
 
-def build_leaderboard_embed(leaderboard: list[tuple[str, int]], assets_url: str) -> discord.Embed:
+def build_leaderboard_embed(leaderboard: list[tuple[str, int]]) -> discord.Embed:
     embed = discord.Embed(
         title="💃🏻 PUTAIN D'OR 🏆",
         description=(
@@ -43,7 +55,7 @@ def build_leaderboard_embed(leaderboard: list[tuple[str, int]], assets_url: str)
     # Podium order: 2nd, 1st, 3rd.
     for medal, (name, count) in (("🥈", second), ("🥇", first), ("🏅", third)):
         embed.add_field(name=f"{medal} {name}", value=f"{count} votos")
-    embed.set_image(url=assets_url + "name_image.jpg")
+    embed.set_image(url=f"attachment://{IMAGE}")
     embed.set_footer(text=FOOTER)
     return embed
 
@@ -75,8 +87,9 @@ class NameDay(commands.Cog):
         if pick is None:
             await interaction.response.send_message("Não há nomes disponíveis.", ephemeral=True)
             return
-        embed = build_name_embed(pick, self.bot.settings.assets_url)
-        await interaction.response.send_message(content=pick.phrase, embed=embed)
+        await interaction.response.send_message(
+            content=pick.phrase, embed=build_name_embed(pick), file=asset_file(THUMBNAIL)
+        )
 
     @app_commands.command(name="putaindor", description="Ranking das putas mais escolhidas.")
     async def putaindor(self, interaction: discord.Interaction) -> None:
@@ -86,8 +99,9 @@ class NameDay(commands.Cog):
                 "Ainda não há ranking; usa /puta para começar.", ephemeral=True
             )
             return
-        embed = build_leaderboard_embed(leaderboard, self.bot.settings.assets_url)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(
+            embed=build_leaderboard_embed(leaderboard), file=asset_file(IMAGE)
+        )
 
 
 async def setup(bot: "KDBot") -> None:
