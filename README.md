@@ -416,7 +416,7 @@ The internal documentation lives in [`docs/`](docs/README.md):
 - [Ratings, ranks and matchmaking](docs/matchmaking.md): how it all works in detail.
 - [Simulations](docs/simulations.md): how to test and tune without Discord.
 - [Tuning](docs/tuning.md): how the settings were chosen, with results.
-- [UI pass guide](docs/ui-pass-guide.md) (every command, step by step, with a worksheet), [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot policy notes](docs/riot-policy.md).
+- [Deploying on Railway](docs/deploy.md), [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot policy notes](docs/riot-policy.md).
 
 ## Roadmap
 

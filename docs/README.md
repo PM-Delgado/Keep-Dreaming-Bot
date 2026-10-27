@@ -9,7 +9,7 @@
 | [testing-lobbies.md](testing-lobbies.md) | test lobbies, results and ranks by hand in Discord with mock players |
 | [../README.md#testing-the-commands](../README.md#testing-the-commands) | check every command's answer, and review all embeds with the real group and test games |
 | [../README.md#the-groups-roster](../README.md#the-groups-roster) | fill the roster file, seed the database, play test games with the real players, list who faced whom (`matches`), reset to a clean state (all league data or just the test games) |
-| [ui-pass-guide.md](ui-pass-guide.md) | test every command in Discord one by one and write down the UI changes (the next session's script) |
+| [deploy.md](deploy.md) | deploy and run the bot on Railway: variables, the database volume, redeploys, backups |
 | [riot-policy.md](riot-policy.md) | read the accepted Riot policy risk and how Riot data is handled |
 
 The project README gives the overview and the setup; `CLAUDE.md` holds the working rules for
