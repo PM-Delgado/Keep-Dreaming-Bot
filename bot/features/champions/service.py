@@ -116,17 +116,19 @@ class ChampionService:
         """Upload the icons that are missing; returns how many were uploaded.
 
         `existing` is the application's emojis by name, so icons uploaded before (or by a run that
-        was cut short) are adopted instead of duplicated. A failure skips that champion; after
-        `MAX_ICON_FAILURES` in a row the run stops (probably a limit or an outage) and the next
-        run picks up where this one left.
+        was cut short) are adopted instead of duplicated. A saved icon only counts if its id is
+        among them: ids belong to one application, so a database moved to another bot starts over
+        by itself. A failure skips that champion; after `MAX_ICON_FAILURES` in a row the run stops
+        (probably a limit or an outage) and the next run picks up where this one left.
         """
         patch = await self.repo.current_patch()
         if not self.icons or patch is None:
             return 0
         done = await self.repo.uploaded()
+        live = set(existing.values())
         uploaded = failures = 0
         for champion in await self.repo.all():
-            if champion.id in done:
+            if done.get(champion.id) in live:
                 continue
             name = emoji_name(champion.id)
             if name in existing:

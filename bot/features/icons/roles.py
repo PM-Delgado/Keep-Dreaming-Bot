@@ -74,16 +74,19 @@ class RoleIconService:
     async def sync(self, existing: Mapping[str, int], upload: UploadIcon) -> int:
         """Upload the icons that are missing (adopting emojis that already exist by name).
 
+        A saved icon only counts if its id is among `existing` (the application's emojis): ids
+        belong to one application, so a database moved to another bot starts over by itself.
         Returns how many were uploaded. A failure skips that role; three in a row stop the run
         and the next one resumes.
         """
         if not self.enabled:
             return 0
         done = await self.repo.all()
+        live = set(existing.values())
         uploaded = failures = 0
         for role in ROLES:
             name = emoji_name(role)
-            if role in done:
+            if role in done and done[role][0] in live:
                 continue
             if name in existing:
                 await self.repo.save(role, existing[name], name)

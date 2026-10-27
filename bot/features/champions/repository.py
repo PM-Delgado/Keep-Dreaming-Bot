@@ -59,9 +59,10 @@ class ChampionRepository:
         async with self.db.conn.execute(sql, args) as cur:
             return {r[0]: f"<:{r[1]}:{r[2]}>" for r in await cur.fetchall()}
 
-    async def uploaded(self) -> set[str]:
-        async with self.db.conn.execute("SELECT champion_id FROM champion_emojis") as cur:
-            return {r[0] for r in await cur.fetchall()}
+    async def uploaded(self) -> dict[str, int]:
+        """Champion id -> the emoji id saved for it."""
+        async with self.db.conn.execute("SELECT champion_id, emoji_id FROM champion_emojis") as cur:
+            return {r[0]: r[1] for r in await cur.fetchall()}
 
     async def save_emoji(self, champion_id: str, emoji_id: int, emoji_name: str) -> None:
         await self.db.conn.execute(

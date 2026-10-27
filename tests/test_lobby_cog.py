@@ -28,7 +28,6 @@ from bot.features.lobby.views import ACTIONS, VISIBLE, LobbyView
 ENV = {
     "DISCORD_TOKEN": "t",
     "GUILD_ID": "123",
-    "ASSETS_URL": "https://x.invalid/a/",
     "DB_PATH": ":memory:",
     "ADMIN_USER_IDS": str(ADMIN),
     "ENABLE_MOCK_PLAYERS": "true",

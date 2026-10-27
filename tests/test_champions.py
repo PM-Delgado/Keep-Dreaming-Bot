@@ -219,6 +219,11 @@ def test_icon_urls_and_emoji_names():
     assert 2 <= len(emoji_name("Kaisa")) <= 32
 
 
+def live(uploads: Uploads) -> dict[str, int]:
+    """The application's emojis after these uploads (what Discord would list)."""
+    return {name: 1001 + i for i, name in enumerate(uploads.names)}
+
+
 async def test_sync_uploads_every_missing_icon_once(db):
     service = await icon_service(db)
     uploads = Uploads()
@@ -226,8 +231,20 @@ async def test_sync_uploads_every_missing_icon_once(db):
     assert sorted(uploads.names) == ["champ_Ahri", "champ_Kaisa", "champ_MonkeyKing"]
     markup = await service.icon_markup(["Ahri", "Nope"])
     assert list(markup) == ["Ahri"] and markup["Ahri"].startswith("<:champ_Ahri:")
-    assert await service.sync_icons({}, uploads) == 0  # nothing left to do
+    assert await service.sync_icons(live(uploads), uploads) == 0  # nothing left to do
     assert len(uploads.names) == 3
+
+
+async def test_icons_saved_for_another_application_are_replaced(db):
+    service = await icon_service(db)
+    for champion_id in ("Ahri", "Kaisa", "MonkeyKing"):  # a development bot's ids
+        await service.repo.save_emoji(champion_id, 9_000, emoji_name(champion_id))
+    uploads = Uploads()
+    assert await service.sync_icons({"champ_Ahri": 555}, uploads) == 2
+    assert "champ_Ahri" not in uploads.names  # adopted by name instead
+    markup = await service.icon_markup(["Ahri", "Kaisa", "MonkeyKing"])
+    assert markup["Ahri"] == "<:champ_Ahri:555>"
+    assert all(":9000>" not in m for m in markup.values())
 
 
 async def test_sync_adopts_emojis_that_already_exist(db):
@@ -243,7 +260,7 @@ async def test_sync_skips_a_failing_icon_and_goes_on(db):
     uploads = Uploads(fail={"champ_Kaisa"})
     assert await service.sync_icons({}, uploads) == 2
     assert set(await service.icon_markup(["Ahri", "Kaisa", "MonkeyKing"])) == {"Ahri", "MonkeyKing"}
-    assert await service.sync_icons({}, Uploads()) == 1  # the next run finishes the job
+    assert await service.sync_icons(live(uploads), Uploads()) == 1  # the next run finishes the job
 
 
 async def test_sync_gives_up_after_repeated_failures(db):
@@ -305,7 +322,7 @@ class FakeEmojiBot:
         return SimpleNamespace(id=9000 + len(self.created))
 
 
-ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1", "ASSETS_URL": "https://x.invalid/a/"}
+ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1"}
 
 
 async def test_the_cog_uploads_missing_icons_and_adopts_existing_ones(db):

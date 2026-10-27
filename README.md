@@ -305,8 +305,8 @@ test in; everyone else still shows up in `/leaderboard`, `/match show` and the g
    pip install -e ".[dev]"
    ```
 
-3. **Configure.** Copy `.env.example` to `.env` and fill in at least `DISCORD_TOKEN`, `GUILD_ID` and
-   `ASSETS_URL`. Never commit `.env`.
+3. **Configure.** Copy `.env.example` to `.env` and fill in at least `DISCORD_TOKEN` and `GUILD_ID`.
+   Never commit `.env`.
 4. **Run.**
 
    ```bash
@@ -328,7 +328,6 @@ Read once at startup from the environment or `.env` (`bot/config.py`).
 |---|---|---|---|
 | `DISCORD_TOKEN` | yes | | Bot token. |
 | `GUILD_ID` | yes | | The server the commands are registered in. |
-| `ASSETS_URL` | yes | | Base URL of the images used by the name-of-the-day embeds. |
 | `ADMIN_USER_IDS` | no | none | Comma-separated Discord user IDs allowed to run admin commands. Empty means nobody. |
 | `DB_PATH` | no | `data/kdbot.sqlite3` | SQLite file location. |
 | `RIOT_API_KEY` | no | | Enables the `/riot` commands. Without it ranks and roles are set manually. |

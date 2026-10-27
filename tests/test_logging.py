@@ -15,7 +15,6 @@ from bot.logging_setup import LOG_FILE, setup_logging
 ENV = {
     "DISCORD_TOKEN": "SECRET-TOKEN",
     "GUILD_ID": "123",
-    "ASSETS_URL": "https://x.invalid/a/",
     "DB_PATH": ":memory:",
     "RIOT_API_KEY": "RGAPI-secret",
 }

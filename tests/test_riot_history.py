@@ -29,7 +29,6 @@ from bot.features.riot.service import CONSENT_NOTICE
 ENV = {
     "DISCORD_TOKEN": "t",
     "GUILD_ID": "123",
-    "ASSETS_URL": "https://x.invalid/a/",
     "DB_PATH": ":memory:",
     "ADMIN_USER_IDS": "99",
 }
