@@ -33,6 +33,9 @@ async def test_registers_exactly_the_expected_commands():
         "lobby",
         "mock",
         "match",
+        "history",
+        "stats",
+        "leaderboard",
     }
     assert EXTENSIONS == (
         "bot.features.nameday.cog",
@@ -42,6 +45,7 @@ async def test_registers_exactly_the_expected_commands():
         "bot.features.players.cog",
         "bot.features.riot.cog",
         "bot.features.lobby.cog",
+        "bot.features.stats.cog",
     )
 
 

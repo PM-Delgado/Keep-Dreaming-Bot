@@ -17,6 +17,7 @@ rank that moves as games are played.
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Commands](#commands)
+- [Testing the commands](#testing-the-commands)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
 - [Development](#development)
@@ -39,6 +40,9 @@ rank that moves as games are played.
   after five games.
 - **Champion and KDA per game.** Players enter their own stats, an admin validates them; champion
   and role icons show up in lobbies, matches, profiles and Riot history.
+- **History, stats and leaderboards.** `/history`, `/stats` and `/leaderboard` read the confirmed
+  games: results, per-role and per-champion records, KDA, and boards by tier, win rate and KDA.
+  Raw ratings are never shown to players.
 - **Optional Riot integration.** Link a League account to seed the rating from the Solo/Duo rank, and
   to estimate role experience and show recent ranked games.
 - **Test without ten friends.** Mock players and a simulator let you try lobbies, results and ranks
@@ -76,81 +80,153 @@ The details (formulas, parameters, how teams are scored) are in
 
 ## Commands
 
-All commands are slash commands, registered only in the configured server. Commands marked *admin*
-need your Discord user ID in `ADMIN_USER_IDS`.
+All commands are slash commands, registered only in the configured server. *Reply* says whether the
+answer is **public** (everyone in the channel sees it) or **private** (only the person who ran it;
+every error message is private). Commands marked *admin* need your Discord user ID in
+`ADMIN_USER_IDS`. Parameters in `[brackets]` are optional.
 
 ### Players
 
-| Command | What it does |
-|---|---|
-| `/register <nickname>` | Join the in-house roster. |
-| `/profile view [user]` | In-house rank (or placement progress), League reference rank, role proficiency. |
-| `/profile roles <role> <proficiency>` | Set how comfortable you are (1-5) on a role, or clear it. |
-| `/profile rank <tier> [division]` | Report your League Solo/Duo rank; it seeds your starting rating while you have few games. |
+| Command | Reply | What it does |
+|---|---|---|
+| `/register <nickname>` | private | Join the in-house roster (2-24 characters, unique). Starts at a default rating until you give a rank. |
+| `/profile view [user]` | public | In-house rank (or placement progress `n/5`), League reference rank, linked Riot accounts, role proficiency with icons. |
+| `/profile roles <role> <proficiency>` | private | Set how comfortable you are (1-5) on a role, or `Limpar` to clear it. |
+| `/profile rank <tier> [division]` | private | Report your League Solo/Duo rank; it seeds your starting rating while you have few games. |
+| `/history [user]` | public | The last 10 confirmed games: result, side, role, champion and KDA (validated stats only; pending ones show "stats por validar"). The header has the overall record. |
+| `/stats [user]` | public | Overall record, win rate and KDA; per role; top 5 champions and champion x role (validated stats only). Every figure shows its number of games. |
+| `/leaderboard [board]` | public | `board` is *Rank do grupo* (default: players past placement, by tier and division, ties share a position), *Taxa de vitórias* or *KDA* (both need 5 games; KDA counts validated games). Ratings are never shown. |
 
 ### Lobbies and games
 
-| Command | What it does |
-|---|---|
-| `/lobby open` | Open the server's in-house lobby in this channel. |
-| `/lobby schedule <when> [note]` | Schedule a lobby (Lisbon time, e.g. `21:00`, `amanhã 21h30`, `sexta 21:00`, `15/08 21:00`). |
-| `/lobby list` | Show the open lobby and the scheduled ones. |
-| `/lobby show [lobby]` | Re-post a lobby message (also removes the stale copy). |
-| `/lobby cancel [lobby]` | Cancel a lobby (creator or admin). |
-| `/match show [match]` | A game's status, teams, champions and KDA; the footer says who confirmed the result and who validated the KDAs. |
-| `/match void <match> [reason]` | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
-| `/match fix <match> <winner>` | *Admin.* Correct a confirmed result or decide a pending or contested one. |
-| `/match stats <champion> <kills> <deaths> <assists> [match]` | Record your own champion and KDA for a confirmed game (default: your latest game without validated stats). Waits for an admin to validate it. |
-| `/match set <match> <member> [champion] [kills] [deaths] [assists] [role]` | *Admin.* Set or correct someone's stats (validated at once) or the role they actually played. |
-| `/match validate <match> [member]` | *Admin.* Validate the pending stats of a game (of one player, or of everybody). |
-| `/match pending` | *Admin.* List the stats waiting for validation. |
+| Command | Reply | What it does |
+|---|---|---|
+| `/lobby open` | public | Open the server's in-house lobby in this channel (a live message with buttons). |
+| `/lobby schedule <when> [note]` | public | Schedule a lobby (Lisbon time, e.g. `21:00`, `21h30`, `amanhã 21:00`, `sexta 21:00`, `15/08 21:00`, `2026-08-15 21:00`). A reminder goes out 30 minutes before. |
+| `/lobby list` | public | The open lobby and the scheduled ones. |
+| `/lobby show [lobby]` | public | Re-post a lobby message here (the stale copy is removed). |
+| `/lobby cancel [lobby]` | private | Cancel a lobby (its creator or an admin). |
+| `/match show [match]` | public | A game's status, teams, roles, champions and KDA (⏳ = pending); the footer says who confirmed the result and who validated the KDAs. Default: the latest game. |
+| `/match stats <champion> <kills> <deaths> <assists> [match]` | private | Record your own champion (autocomplete) and KDA (0-99) for a confirmed game; default: your latest game without validated stats. Waits for an admin to validate it. |
+| `/match void <match> [reason]` | private + channel notice | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
+| `/match fix <match> <winner>` | private + channel notice | *Admin.* Correct a confirmed result or decide a pending or contested one. |
+| `/match set <match> <member> [champion] [kills] [deaths] [assists] [role]` | private | *Admin.* Set or correct someone's stats (validated at once) or the role they actually played. |
+| `/match validate <match> [member]` | private | *Admin.* Validate the pending stats of a game (of one player, or of everybody). |
+| `/match pending` | private | *Admin.* List the stats waiting for validation, oldest game first. |
 
 The lobby message carries the buttons: **Entrar**, **Sair**, **Pronto**, **Recusar**, **Confirmar**
 (teams), **Azul ganhou** / **Vermelho ganhou**, **Confirmar resultado**, **Contestar** and
-**Cancelar**. Only the buttons that make sense for the current state are shown.
+**Cancelar**. Only the buttons that make sense for the current state are shown. When a result is
+confirmed, corrected or voided the bot also posts a summary in the channel (winner, promotions,
+demotions, finished placements, and a reminder to use `/match stats`).
 
 ### Riot accounts (optional, needs `RIOT_API_KEY`)
 
-| Command | What it does |
-|---|---|
-| `/riot link <riot_id> [platform] [player]` | Link a Riot account (`Name#TAG`). The first becomes the main. Admins can link for others. |
-| `/riot main <riot_id> [player]` | Choose which account supplies the rank. |
-| `/riot unlink <riot_id> [player]` | Remove an account and all data tied to it. |
-| `/riot list [player]` | List linked accounts (visible to everyone). |
-| `/riot refresh [player]` | Refresh names, rank and ranked history (10 minute cooldown for players). |
-| `/riot history [player] [riot_id]` | Last ten ranked Solo/Duo games: result, champion and role (icons), KDA, CS, duration. |
+Without the key every `/riot` command answers that the integration is disabled.
+
+| Command | Reply | What it does |
+|---|---|---|
+| `/riot link <riot_id> [platform] [player]` | private | Link a Riot account (`Name#TAG`; the platform defaults to `RIOT_DEFAULT_PLATFORM`). The first becomes the main. Shows the consent notice. Only admins may use `player`. |
+| `/riot main <riot_id> [player]` | private | Choose which account supplies the rank. |
+| `/riot unlink <riot_id> [player]` | private | Remove an account and all data tied to it. |
+| `/riot list [player]` | public | List linked accounts (visible to everyone). |
+| `/riot refresh [player]` | private | Refresh names, rank and ranked history (10 minute cooldown for players; admins skip it). |
+| `/riot history [player] [riot_id]` | public | Last ten ranked Solo/Duo games: result, champion and role (icons), KDA, CS, duration. |
 
 ### Admin
 
+All replies are private.
+
 | Command | What it does |
 |---|---|
-| `/admin player register <member> [display_name]` | Register a server member in advance. |
-| `/admin rating inspect <user>` | Show the hidden rating, rank estimate and matchmaking estimate (the only place raw numbers appear). |
-| `/admin rating set <user> <mu> [sigma]` | Adjust a player's hidden rating. |
-| `/admin rating rank <user> [tier] [division]` | Override a player's rank (leave the tier empty to clear the override). |
+| `/admin player register <member> [display_name]` | Register a server member in advance. An existing player is never modified. |
+| `/admin rating inspect <user>` | Show the hidden rating (H), rank estimate (R) and matchmaking estimate (E): the only place raw numbers appear. |
+| `/admin rating set <user> <mu> [sigma] [note]` | Adjust a player's hidden rating (mu 0-100, sigma 0.5-25). Placement still applies. |
+| `/admin rating rank <user> [tier] [division]` | Override a player's reference rank (leave the tier empty to clear the override). |
 | `/admin rating recompute` | Rebuild all ratings from the stored games. |
-| `/admin roles set <user> <role> <proficiency>` | Override a role proficiency. |
-| `/sync` | *Owner only.* Re-sync the commands (also done on startup). |
+| `/admin roles set <user> <role> <proficiency>` | Override a role proficiency (`Limpar` clears it). |
+| `/sync` | *Bot owner only.* Re-sync the commands (also done on startup). |
 
-### Testing (only with `ENABLE_MOCK_PLAYERS=true`, admin)
+### Testing (only with `ENABLE_MOCK_PLAYERS=true`, admin, private replies)
 
 | Command | What it does |
 |---|---|
-| `/mock create [count] [main_role]` | Create fake players. |
-| `/mock fill [count] [lobby]` | Put fake players into a lobby. |
+| `/mock create [count] [main_role]` | Create 1-30 fake players, optionally all with the same main role. |
+| `/mock fill [count] [lobby]` | Put fake players into the open (or a given scheduled) lobby; default 9, so you plus 9 make ten. |
 | `/mock ready [lobby]`, `/mock drop [lobby]` | Make the fake players confirm the ready-check, or leave. |
-| `/mock report <winner>`, `/mock confirm` | A fake player reports or confirms a result. |
+| `/mock report <winner> [lobby]`, `/mock confirm [lobby]` | A fake player reports a result, or one on the other team confirms it. |
 | `/mock stats [match] [validate]` | The fake players of a confirmed game enter random champion and KDA (optionally validated). |
 | `/mock list`, `/mock clear` | List the fake players; delete them and the test games they played. |
 
+Mock players have fake Discord IDs, so they cannot be picked as the `user` of `/profile view`,
+`/history` or `/stats`; they only appear in lobbies, games and `/mock list`. They are never listed
+on `/leaderboard`.
+
 ### Name of the day
 
-| Command | What it does |
-|---|---|
-| `/puta` | Today's name (Europe/Lisbon date); picked at random on first use of the day. |
-| `/putaindor` | Podium of the three most-picked names. |
+| Command | Reply | What it does |
+|---|---|---|
+| `/puta` | public | Today's name (Europe/Lisbon date); picked at random on first use of the day. |
+| `/putaindor` | public | Podium of the three most-picked names. |
 
 A daily task also makes the pick at 00:00 Europe/Lisbon.
+
+## Testing the commands
+
+Two ways to get data to test with. Both leave your real database alone.
+
+**1. A demo database (every embed with realistic data).** Build it once, then start the bot on it:
+
+```bash
+python tools/seed_demo.py --owner-id <your user id> --bot-id <the bot's user id> [--guild-id <id>] [--force]
+```
+
+```powershell
+$env:DB_PATH = "data/demo.sqlite3"; python -m bot        # PowerShell
+```
+
+(The guild id defaults to `GUILD_ID` and your id to the first `ADMIN_USER_IDS`; the file name must
+contain "demo".) It plays 22 games through the real services, so ratings and tiers are consistent:
+14 regular players (**Demo Tu** is you, **Demo Bot** is the bot, ten friends, two newcomers still in
+placement), plus "Demo Extra NN" players that only fill the unfinished games. Game states: confirmed
+by players, by an admin and automatically, corrected, voided before and after the result, contested,
+reported and in progress. Stats are validated, pending or missing; one of your games has a played
+role that differs from the assigned one; you have two Riot accounts and three friends one each, with
+ranked history. Only you and the bot have real IDs, so with Discord's user picker you can inspect
+**your** and **the bot's** profile, history and stats; everyone else shows up in `/leaderboard`,
+`/match show` and the games. The reported game is auto-confirmed about 20 minutes after seeding, so
+look at it first (reseed with `--force` to get it back). A database cannot hold the *lobby message*
+of an open or scheduled lobby: use `/lobby open`, `/lobby schedule` and `/mock` for those.
+
+**2. Mock players on your dev database** (see [docs/testing-lobbies.md](docs/testing-lobbies.md)):
+`ENABLE_MOCK_PLAYERS=true`, `/register`, `/lobby open`, `/mock fill`, `/mock ready`, **Pronto**,
+**Confirmar**, `/mock report`, and so on. `/mock clear` removes them and their games afterwards.
+
+**Checklist: what each command should answer.** Texts are in Portuguese, as the bot shows them.
+
+| Try | Expect |
+|---|---|
+| `/register Ana` | Private: "Registado como **Ana**! Define as tuas roles com /profile roles e o teu rank com /profile rank." A second `/register`, or a nickname already taken: a private error. |
+| `/profile roles role:Mid proficiency:5` | Private: "Proficiência em **Mid** definida para 5/5." (`Limpar`: "limpa"). |
+| `/profile rank tier:Gold division:II` | Private: "Rank de referência: **Gold II**. Serve só como ponto de partida; ..." |
+| `/profile view` | Public embed: *Rank do grupo* (or "Sem rank (colocação n/5)"), *Rank League (referência)*, Riot accounts if any, *Roles* with icons; the footer says the rank is internal and carries the Riot notice. |
+| `/lobby open` | Public lobby message "In-house #n · Aberta" with buttons. A second open: a private error. |
+| `/mock fill`, `/mock ready`, then **Pronto** | Ready-check ping, then balanced teams (Azul/Vermelho) with a role icon per player and no ratings shown. |
+| **Confirmar**, then `/mock report winner:Azul` | "Resultado por confirmar"; **Confirmar resultado** / **Contestar** appear for the other team. As an admin your confirm is final at once; otherwise use `/mock confirm`. |
+| After the result | Public summary: "🏆 In-house #n: **Azul ganhou**", 🎯 finished placement / 📈 / 📉 lines, "Em colocação: ..." and the `/match stats` hint. |
+| `/match stats champion:Ahri kills:8 deaths:2 assists:11` | Private: "Jogo #n: **Ahri 8/2/11** registado. Falta um admin validar." |
+| `/match show` | Public embed: teams with `<role icon> Name — <champion icon> 8/2/11`, ⏳ while pending, footer "Resultado confirmado por X · KDAs validados por Y · N por validar". |
+| `/match pending`, then `/match validate match:n` | Private list "Stats por validar"; then "Jogo #n: k stats validadas." |
+| `/match set match:n member:@x champion:Zed kills:1 deaths:2 assists:3 role:Top` | Private confirmation; the stats are validated at once and the played role shows. |
+| `/match fix match:n winner:Vermelho`, `/match void match:n reason:teste` | Private "Feito." plus a channel summary ("✏️ Resultado ... corrigido" / "🚫 In-house #n anulada (teste)"); ratings follow. |
+| `/history`, `/stats`, `/leaderboard board:...` | The public embeds described in the Players table. A brand-new player: "Ainda não há jogos confirmados."; boards without enough games: "Ainda ninguém tem 5 jogos." / "Ainda ninguém terminou a colocação." |
+| `/lobby schedule when:amanhã 21:00 note:teste`, `/lobby list`, `/lobby cancel` | Public "Agendada" message; the list shows both lobbies; cancel answers privately "Lobby cancelada." |
+| `/riot link riot_id:Nome#TAG` (needs the key) | Private summary plus the consent notice; `/riot list` and `/riot history` answer publicly. |
+| `/admin rating inspect user:@x` | Private embed with H, R and E (raw numbers; the only place they appear). |
+| `/admin rating set`, `/admin rating rank`, `/admin roles set`, `/admin rating recompute` | Private one-line confirmations; "Ratings reconstruídos." for recompute. |
+| `/sync` | Private: "Sincronizados n comandos." (bot owner only; anyone else is refused). |
+| A non-admin running an admin command | Private: "Não tens permissão para usar este comando." An unexpected failure: "Ocorreu um erro inesperado. Tenta novamente mais tarde." |
+| `/puta`, `/putaindor` | Public name-of-the-day embeds ("Ainda não há ranking; usa /puta para começar." before any pick). |
 
 ## Getting started
 
@@ -181,7 +257,8 @@ A daily task also makes the pick at 00:00 Europe/Lisbon.
    commands to your server.
 
 To try the lobby alone, set `ENABLE_MOCK_PLAYERS=true` and `ADMIN_USER_IDS` to your own user ID, then
-follow [docs/testing-lobbies.md](docs/testing-lobbies.md).
+follow [docs/testing-lobbies.md](docs/testing-lobbies.md). To review every embed with realistic data,
+build the demo database; both ways are described in [Testing the commands](#testing-the-commands).
 
 ## Configuration
 
@@ -230,9 +307,10 @@ bot/
     balance/       pure team balancer
     lobby/         lobby state machine, messages, buttons, /lobby /match /mock commands
     matches/       match records: results, confirmations, corrections, audit
+    stats/         read-only /history, /stats and /leaderboard from confirmed games
     simulation/    scenarios, simulated seasons and the tuning lab (not loaded by the bot)
 tests/             pytest, in-memory SQLite
-tools/             dev-only scripts
+tools/             dev-only scripts (ladder_sim.py; seed_demo.py builds a demo database)
 docs/              internal documentation
 ```
 
@@ -256,7 +334,7 @@ The internal documentation lives in [`docs/`](docs/README.md):
 - [Ratings, ranks and matchmaking](docs/matchmaking.md): how it all works in detail.
 - [Simulations](docs/simulations.md): how to test and tune without Discord.
 - [Tuning](docs/tuning.md): how the settings were chosen, with results.
-- [Testing lobbies by hand](docs/testing-lobbies.md) and [Riot policy notes](docs/riot-policy.md).
+- [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot policy notes](docs/riot-policy.md).
 
 ## Roadmap
 
@@ -266,7 +344,7 @@ The internal documentation lives in [`docs/`](docs/README.md):
 - [x] Result reporting, confirmation, corrections, ratings from games
 - [x] Simulator and tuning lab
 - [x] Champion and KDA entry with admin validation, champion and role icons
-- [ ] Match history, personal stats and leaderboards
+- [x] Match history, personal stats and leaderboards
 - [ ] Optional captain draft
 
 ## Riot Games disclaimer
