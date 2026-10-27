@@ -85,8 +85,8 @@ async def test_second_account_is_not_main_and_adds_no_rank_evidence(stack, world
     assert rank is not None
     assert rank.label() == "Gold II"  # the main alone decides R
     assert await stack.players.account_labeler(player.id) == [
-        "Alpha#EUW (EUW1) ★",
-        "Beta#EUW (EUW1)",
+        "Alpha#EUW ★",
+        "Beta#EUW",
     ]
 
 
@@ -354,7 +354,7 @@ async def test_profile_uses_estimates_below_declarations_and_lists_accounts(stac
     by_role = {line.role: line.proficiency for line in profile.roles}
     assert (by_role["ADC"].value, by_role["ADC"].source) == (3, "estimated")
     assert (by_role["SUPPORT"].value, by_role["SUPPORT"].source) == (5, "declared")
-    assert profile.accounts == ["Alpha#EUW (EUW1) ★"]
+    assert profile.accounts == ["Alpha#EUW ★"]
 
 
 # --- refresh --------------------------------------------------------------------------------------

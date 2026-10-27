@@ -349,6 +349,7 @@ async def setup(bot: "KDBot") -> None:
     players_cog.ratings.main_puuid_of = service.main_puuid_of
     players_cog.players.role_estimator = service.role_estimates
     players_cog.players.account_labeler = service.account_labels
+    players_cog.players.champion_pooler = service.champion_pool
     await bot.add_cog(
         Riot(
             bot,

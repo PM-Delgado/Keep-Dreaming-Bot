@@ -1,5 +1,6 @@
 """/history, /stats and /leaderboard: the rules (service), the embeds (render) and the commands."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -8,17 +9,18 @@ import pytest
 import pytest_asyncio
 from lobby_fakes import ADMIN, GUILD, LobbyStack, sides_of, start_game
 
+from bot.features.players.profile_embed import NOT_REGISTERED
 from bot.features.players.repository import Player
 from bot.features.players.service import PlayerError
 from bot.features.ratings.ladder import DEFAULT_LADDER
 from bot.features.stats.cog import Stats
 from bot.features.stats.render import (
     MAX_BOARD_ROWS,
+    board_line,
     build_board_embed,
     build_history_embed,
     build_stats_embed,
-    kda_summary,
-    tally_text,
+    tally_line,
 )
 from bot.features.stats.repository import StatsRepository
 from bot.features.stats.service import (
@@ -158,7 +160,7 @@ async def test_pending_stats_do_not_count_but_are_reported(stack, service):
     stats = await service.stats(GUILD, 1)
     assert stats.kda is None and stats.by_champion == [] and stats.pending == 1
     embed = build_stats_embed(stats, {}, {}, {})
-    assert "1 jogo com stats por validar" in (embed.description or "")
+    assert "⏳ 1 jogo por validar (ainda não contam)" in (embed.description or "")
     assert [f.name for f in embed.fields] == ["Por role"]
 
 
@@ -260,24 +262,33 @@ async def test_the_history_embed_has_icons_with_name_fallbacks_and_no_ratings(st
     names = await stack.champions.names(["Kaisa"])
     plain = build_history_embed(history, NOW, {}, {}, names).description or ""
     assert "**Kai'Sa** 8/2/11" in plain and "stats por validar ⏳" in plain
-    assert f"#{first}" in plain and "Últimos 2 de 2 jogos" in plain and "(50% · 2 jogos)" in plain
+    assert f"#{first}" in plain and "Jogos: 1V 1D (50%) · 2 jogos" in plain
+    assert "Últimos" not in plain  # nothing was cut, so no "last n" note
     sides = {history.lines[0].role: "<:role:1>"}
     icons = {"Kaisa": "<:champ_Kaisa:2>"}
     rich = build_history_embed(history, NOW, sides, icons, names).description or ""
     assert "<:champ_Kaisa:2> 8/2/11" in rich and "<:role:1>" in rich
-    assert "Rank interno do grupo" in (
-        build_history_embed(history, NOW, {}, {}, {}).footer.text or ""
-    )
+    assert "🔵" not in rich and "🔴" not in rich  # the team side is not shown
+    assert "# Histórico · " in plain  # large heading
+    embed = build_history_embed(history, NOW, {}, {}, {}, "https://cdn.invalid/a.png")
+    assert embed.footer.text is None  # no footer
+    assert embed.thumbnail.url == "https://cdn.invalid/a.png"
+    assert embed.color == discord.Color.blurple()  # no color given: no League rank
+    gold = discord.Color(0xCD8837)
+    assert build_history_embed(history, NOW, {}, {}, {}, None, gold).color == gold
+    cut = replace(history, overall=Tally(6, 4))  # more games than the lines shown
+    assert "Últimos 2 jogos:" in (build_history_embed(cut, NOW, {}, {}, {}).description or "")
 
 
 async def test_an_empty_history_and_empty_boards_say_so(stack, service):
     history = await service.history(GUILD, 1)
-    assert (
-        build_history_embed(history, NOW, {}, {}, {}).description
-        == "Ainda não há jogos confirmados."
+    assert (build_history_embed(history, NOW, {}, {}, {}).description or "").endswith(
+        "Ainda não há jogos confirmados."
     )
     stats = await service.stats(GUILD, 1)
-    assert build_stats_embed(stats, {}, {}, {}).description == "Ainda não há jogos confirmados."
+    assert (build_stats_embed(stats, {}, {}, {}).description or "").endswith(
+        "Ainda não há jogos confirmados."
+    )
     assert "colocação" in (build_board_embed(RANK, [], DEFAULT_LADDER).description or "")
     assert "5 jogos" in (build_board_embed(WIN_RATE, [], DEFAULT_LADDER).description or "")
 
@@ -291,7 +302,8 @@ def test_a_long_board_is_cut_and_stays_within_discords_limit():
     ]
     embed = build_board_embed(RANK, entries, DEFAULT_LADDER)
     description = embed.description or ""
-    assert description.count("\n") == MAX_BOARD_ROWS  # rows plus the "… e mais" line
+    # heading, rule and blank line, the rows, and the "… e mais" line
+    assert description.count("\n") == MAX_BOARD_ROWS + 3
     assert description.endswith("… e mais 10.") and len(description) < 4096
 
 
@@ -305,8 +317,11 @@ def test_nicknames_are_escaped():
 
 class FakeInteraction:
     def __init__(self, user_id: int, guild_id: int | None = GUILD) -> None:
-        self.user = SimpleNamespace(id=user_id)
+        self.user = SimpleNamespace(
+            id=user_id, display_avatar=SimpleNamespace(url="https://cdn.invalid/a.png")
+        )
         self.guild_id = guild_id
+        self.guild = None  # tests that need the leader's avatar set a fake guild
         self.sent: list[dict] = []
         outer = self
 
@@ -327,12 +342,14 @@ async def test_history_and_stats_default_to_the_caller_and_are_public(stack, cog
     await validated(stack, match_id, 1, "kaisa", 8, 2, 11)
     ix = FakeInteraction(1)
     await cog.history.callback(cog, ix)  # type: ignore[arg-type]
-    assert "ephemeral" not in ix.sent[0] and "Player 01" in ix.sent[0]["embed"].title
-    assert "8/2/11" in ix.sent[0]["embed"].description
-    target = SimpleNamespace(id=2)
+    embed = ix.sent[0]["embed"]
+    assert "ephemeral" not in ix.sent[0] and "Player 01" in embed.description
+    assert "8/2/11" in embed.description
+    assert embed.thumbnail.url == "https://cdn.invalid/a.png"
+    target = SimpleNamespace(id=2, display_avatar=SimpleNamespace(url="https://cdn.invalid/b.png"))
     ix = FakeInteraction(1)
     await cog.stats.callback(cog, ix, target)  # type: ignore[arg-type]
-    assert "Player 02" in ix.sent[0]["embed"].title
+    assert "Player 02" in ix.sent[0]["embed"].description
     assert ix.sent[0]["allowed_mentions"].users is False
 
 
@@ -343,7 +360,12 @@ async def test_the_commands_refuse_politely(stack, cog):
         if command is cog.leaderboard:
             assert isinstance(ix.sent[0]["embed"], discord.Embed)
         else:
-            assert ix.sent[0]["ephemeral"] is True and "não está registado" in ix.sent[0]["content"]
+            assert ix.sent[0]["ephemeral"] is True
+            expected = NOT_REGISTERED if command is cog.history else None
+            if expected:
+                assert ix.sent[0]["content"] == expected
+            else:
+                assert "registado" in ix.sent[0]["content"]
         ix = FakeInteraction(1, guild_id=None)
         await command.callback(cog, ix, *args)  # type: ignore[arg-type]
         assert ix.sent[0]["ephemeral"] is True and "servidor" in ix.sent[0]["content"]
@@ -353,15 +375,15 @@ async def test_leaderboard_picks_the_board_from_the_choice(stack, cog):
     ix = FakeInteraction(1)
     choice = SimpleNamespace(value=KDA)
     await cog.leaderboard.callback(cog, ix, choice)  # type: ignore[arg-type]
-    assert "KDA" in ix.sent[0]["embed"].title
+    assert "KDA Scrims" in ix.sent[0]["embed"].description
     ix = FakeInteraction(1)
     await cog.leaderboard.callback(cog, ix, None)  # type: ignore[arg-type]
-    assert ix.sent[0]["embed"].title == "Ranking do grupo"
+    assert "Rank Scrims" in ix.sent[0]["embed"].description
 
 
 def test_a_single_game_is_not_pluralised():
-    assert tally_text(Tally(1, 0)) == "1V 0D (100% · 1 jogo)"
-    assert kda_summary(Kda(1, 5, 1, 5), 3).endswith("em 1 jogo")
+    assert tally_line(Tally(1, 0)) == "Jogos: 1V 0D (100%) · 1 jogo"
+    assert tally_line(Tally()) == "Jogos: 0V 0D (—) · 0 jogos"
 
 
 async def test_the_rank_board_orders_a_division_by_progress_and_shows_the_bars(stack, service):
@@ -385,3 +407,94 @@ async def test_the_rank_board_orders_a_division_by_progress_and_shows_the_bars(s
     assert "No Box II ▰▰▱▱▱▱▱▱▱▱" in line["Player 03"]
     assert "No Box III ▰▰▰▰▰▰▰▰▱▱" in line["Player 02"]
     assert "No Box III ▰▰▱▱▱▱▱▱▱▱" in line["Player 01"]
+
+
+async def test_the_stats_embed_follows_the_profile_layout(stack, service):
+    first, _ = await play(stack, player_wins=True)
+    await validated(stack, first, 1, "kaisa", 8, 2, 11)
+    stats = await service.stats(GUILD, 1)
+    roles = {"TOP": "<:top:1>", "JUNGLE": "<:jg:2>", "MID": "<:mid:3>"}
+    roles |= {"ADC": "<:adc:4>", "SUPPORT": "<:sup:5>"}
+    icons = {"Kaisa": "<:champ_Kaisa:2>"}
+    embed = build_stats_embed(
+        stats, roles, icons, {}, "https://cdn.invalid/a.png", discord.Color(1)
+    )
+    description = embed.description or ""
+    assert description.startswith("# Estatísticas · Player 01")
+    assert (
+        "Jogos: 1V 0D (100%) · 1 jogo" in description and "KDA: 9.50 (8.0/2.0/11.0)" in description
+    )
+    by_role = next(f.value for f in embed.fields if f.name == "Por role") or ""
+    assert len(by_role.splitlines()) == 5  # always the five roles
+    assert by_role.count("0V 0D") == 4
+    pairs = next(f.value for f in embed.fields if f.name == "Campeões Scrims por role") or ""
+    assert pairs.endswith("<:champ_Kaisa:2> 1V 0D · KDA 9.50") and pairs.startswith(
+        "<:"
+    )  # role first
+    assert embed.footer.text is None and embed.color == discord.Color(1)
+    assert embed.thumbnail.url == "https://cdn.invalid/a.png"
+
+
+async def test_history_and_stats_carry_the_league_tier_colour(stack, service, cog):
+    await stack.ratings.set_self_reported_rank(1, "GOLD", "II", 1)
+    for command in (cog.history, cog.stats):
+        ix = FakeInteraction(1)
+        await command.callback(cog, ix)  # type: ignore[arg-type]
+        assert ix.sent[0]["embed"].color == discord.Color(0xCD8837)
+
+
+def test_the_leaderboard_has_no_footer():
+    assert build_board_embed(RANK, [], DEFAULT_LADDER).footer.text is None
+
+
+def test_board_rows_have_medals_for_the_podium_and_follow_each_boards_numbers():
+    ana, bia, cai, dan = (player(i, n) for i, n in enumerate(("Ana", "Bia", "Cai", "Dan"), 1))
+    kda = Kda(5, 30, 10, 20)
+    win = [BoardEntry(1, ana, Tally(5, 2)), BoardEntry(2, bia, Tally(3, 4))]
+    assert board_line(WIN_RATE, win[0], DEFAULT_LADDER) == "🥇 **Ana** · 71% · 5V 2D · 7 jogos"
+    assert board_line(WIN_RATE, win[1], DEFAULT_LADDER) == "🥈 **Bia** · 43% · 3V 4D · 7 jogos"
+    third = BoardEntry(3, cai, Tally(5, 0), kda)
+    assert board_line(KDA, third, DEFAULT_LADDER) == "🥉 **Cai** · 5.00 (6.0/2.0/4.0) · 5 jogos"
+    fourth = BoardEntry(4, dan, Tally(5, 0), kda)
+    assert board_line(KDA, fourth, DEFAULT_LADDER).startswith("4. **Dan**")
+
+
+def test_boards_have_a_heading_a_rule_a_colour_each_and_the_leaders_avatar():
+    entries = [BoardEntry(1, player(1, "Ana"), Tally(5, 2), Kda(5, 30, 10, 20))]
+    colours = set()
+    for board in (RANK, WIN_RATE, KDA):
+        embed = build_board_embed(board, entries, DEFAULT_LADDER, "https://cdn.invalid/a.png")
+        lines = (embed.description or "").splitlines()
+        assert lines[0].startswith("# ") and lines[1].startswith("-# 1 jogadores · ")
+        assert embed.footer.text is None and embed.title is None
+        assert embed.thumbnail.url == "https://cdn.invalid/a.png"
+        colours.add(embed.color)
+    assert len(colours) == 3
+    empty = build_board_embed(WIN_RATE, [], DEFAULT_LADDER, "https://cdn.invalid/a.png")
+    assert (empty.description or "").endswith("Ainda ninguém tem 5 jogos.")
+    assert empty.thumbnail.url is None  # nobody to show
+
+
+async def test_the_leaderboard_shows_the_leaders_avatar_when_the_member_is_reachable(stack, cog):
+    for _ in range(5):
+        await play(stack)
+
+    class Guild:
+        def __init__(self, found: bool) -> None:
+            self.found = found
+
+        def get_member(self, discord_id: int):
+            avatar = SimpleNamespace(url=f"https://cdn.invalid/{discord_id}.png")
+            return SimpleNamespace(display_avatar=avatar) if self.found else None
+
+        async def fetch_member(self, discord_id: int):
+            raise discord.NotFound(SimpleNamespace(status=404, reason="x"), "unknown member")  # type: ignore[arg-type]
+
+    ix = FakeInteraction(1)
+    ix.guild = Guild(True)  # type: ignore[assignment]
+    await cog.leaderboard.callback(cog, ix, None)  # type: ignore[arg-type]
+    assert ix.sent[0]["embed"].thumbnail.url.startswith("https://cdn.invalid/")
+    ix = FakeInteraction(1)
+    ix.guild = Guild(False)  # type: ignore[assignment]  # left the server: no picture, no error
+    await cog.leaderboard.callback(cog, ix, None)  # type: ignore[arg-type]
+    assert ix.sent[0]["embed"].thumbnail.url is None

@@ -159,6 +159,7 @@ class Stack:
         )
         self.players.role_estimator = self.riot.role_estimates
         self.players.account_labeler = self.riot.account_labels
+        self.players.champion_pooler = self.riot.champion_pool
 
     async def register(self, discord_id: int, nickname: str) -> int:
         return (await self.players.register(discord_id, nickname)).id

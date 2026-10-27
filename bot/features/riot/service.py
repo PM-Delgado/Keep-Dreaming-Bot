@@ -231,9 +231,13 @@ class RiotService:
 
     async def account_labels(self, player_id: int) -> list[str]:
         return [
-            f"{a.riot_id} ({a.platform.upper()}){' ★' if a.is_main else ''}"
+            f"{a.riot_id}{' ★' if a.is_main else ''}"
             for a in await self.repo.list_accounts(player_id)
         ]
+
+    async def champion_pool(self, player_id: int, limit: int) -> list[tuple[str, int]]:
+        """The most played champions in the stored ranked games: (Data Dragon id, games)."""
+        return await self.repo.champion_pool(player_id, limit)
 
     async def recent_history(
         self, discord_id: int, limit: int = HISTORY_LIMIT, riot_id: str | None = None

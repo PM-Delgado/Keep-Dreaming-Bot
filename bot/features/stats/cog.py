@@ -10,7 +10,10 @@ from discord.ext import commands
 
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
+from bot.features.players.profile_embed import NOT_REGISTERED
+from bot.features.players.repository import Player
 from bot.features.players.service import PlayerError
+from bot.features.players.text import tier_color
 from bot.features.stats.render import build_board_embed, build_history_embed, build_stats_embed
 from bot.features.stats.repository import StatsRepository
 from bot.features.stats.service import KDA, MIN_BOARD_GAMES, RANK, WIN_RATE, StatsService
@@ -20,9 +23,11 @@ if TYPE_CHECKING:
 
 NO_MENTIONS = discord.AllowedMentions.none()
 BOARD_CHOICES = [
-    app_commands.Choice(name="Rank do grupo", value=RANK),
-    app_commands.Choice(name=f"Taxa de vitórias (mín. {MIN_BOARD_GAMES} jogos)", value=WIN_RATE),
-    app_commands.Choice(name=f"KDA (mín. {MIN_BOARD_GAMES} jogos com stats validadas)", value=KDA),
+    app_commands.Choice(name="Rank Scrims", value=RANK),
+    app_commands.Choice(name=f"Win Rate Scrims (mín. {MIN_BOARD_GAMES} jogos)", value=WIN_RATE),
+    app_commands.Choice(
+        name=f"KDA Scrims (mín. {MIN_BOARD_GAMES} jogos com stats validadas)", value=KDA
+    ),
 ]
 
 
@@ -47,6 +52,22 @@ class Stats(commands.Cog):
         unique = sorted(set(ids))
         return await self.champions.icon_markup(unique), await self.champions.names(unique)
 
+    async def _color(self, player: Player) -> discord.Color:
+        """The side bar has the colour of the player's League Solo/Duo tier, as on the profile."""
+        return tier_color((await self.service.ratings.resolve(player.id)).rank)
+
+    async def _avatar(self, guild: discord.Guild | None, player: Player) -> str | None:
+        """The Discord avatar of a player (the board's leader), or None if not reachable."""
+        if guild is None:
+            return None
+        member = guild.get_member(player.discord_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(player.discord_id)
+            except discord.HTTPException:
+                return None
+        return member.display_avatar.url
+
     @app_commands.command(
         name="history", description="Mostra os últimos jogos in-house de um jogador."
     )
@@ -58,11 +79,19 @@ class Stats(commands.Cog):
         target = user or interaction.user
         try:
             history = await self.service.history(interaction.guild_id, target.id)
-        except PlayerError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+        except PlayerError:
+            await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
             return
         icons, names = await self._champion_maps([g.champion for g in history.lines if g.champion])
-        embed = build_history_embed(history, datetime.now(UTC), self._roles(), icons, names)
+        embed = build_history_embed(
+            history,
+            datetime.now(UTC),
+            self._roles(),
+            icons,
+            names,
+            target.display_avatar.url,
+            await self._color(history.player),
+        )
         await interaction.response.send_message(embed=embed, allowed_mentions=NO_MENTIONS)
 
     @app_commands.command(
@@ -76,13 +105,20 @@ class Stats(commands.Cog):
         target = user or interaction.user
         try:
             stats = await self.service.stats(interaction.guild_id, target.id)
-        except PlayerError as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+        except PlayerError:
+            await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
             return
         icons, names = await self._champion_maps(
             [b.key[0] for b in (*stats.by_champion, *stats.by_champion_role)]
         )
-        embed = build_stats_embed(stats, self._roles(), icons, names)
+        embed = build_stats_embed(
+            stats,
+            self._roles(),
+            icons,
+            names,
+            target.display_avatar.url,
+            await self._color(stats.player),
+        )
         await interaction.response.send_message(embed=embed, allowed_mentions=NO_MENTIONS)
 
     @app_commands.command(name="leaderboard", description="Classificações do grupo.")
@@ -96,7 +132,8 @@ class Stats(commands.Cog):
             return
         kind = board.value if board else RANK
         entries = await self.service.leaderboard(interaction.guild_id, kind)
-        embed = build_board_embed(kind, entries, self.service.ratings.ladder)
+        avatar = await self._avatar(interaction.guild, entries[0].player) if entries else None
+        embed = build_board_embed(kind, entries, self.service.ratings.ladder, avatar)
         await interaction.response.send_message(embed=embed, allowed_mentions=NO_MENTIONS)
 
 
@@ -114,6 +151,9 @@ async def setup(bot: "KDBot") -> None:
         players_cog.players,  # type: ignore[attr-defined]
         players_cog.ratings,  # type: ignore[attr-defined]
     )
+    # The profile (players cog) shows in-house numbers and champion icons from here.
+    players_cog.stats = service  # type: ignore[attr-defined]
+    players_cog.champions = champions_cog.service  # type: ignore[attr-defined]
     icons_cog = bot.get_cog("Icons")
     await bot.add_cog(
         Stats(

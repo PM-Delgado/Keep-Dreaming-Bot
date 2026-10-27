@@ -6,7 +6,7 @@ from riot_fakes import NOW, FakeRiot, Stack, days_ago
 
 from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
-from bot.features.players.cog import build_profile_embed
+from bot.features.players.profile_embed import build_profile_embed
 from bot.features.ratings.ladder import DEFAULT_LADDER
 from bot.features.riot.cog import NOT_ADMIN, Riot, build_list_embed, link_summary
 from bot.features.riot.service import CONSENT_NOTICE, LinkResult
@@ -202,9 +202,9 @@ async def test_profile_and_list_embeds_show_accounts_rank_age_and_state(cog_stac
     profile = await stack.players.profile(1)
     embed = build_profile_embed(profile, DEFAULT_LADDER)
     fields = {f.name: f.value or "" for f in embed.fields}
-    assert fields["Contas Riot"] == "Alpha#EUW (EUW1) ★"
-    assert fields["Rank League (referência)"] == "Riot Solo/Duo: Gold II (há 0 d)"
-    assert "Sem rank (colocação 0/5)" in fields["Rank do grupo"]  # never mirrors Riot's rank
+    assert fields["Contas Riot"] == "Alpha#EUW ★"
+    assert fields["Rank League"] == "Gold II"
+    assert "Sem rank (colocação 0/5)" in fields["Scrims"]  # never mirrors Riot's rank
     listing = build_list_embed("Ana", await stack.riot.accounts(1), NOW)
     assert "3 jogos ranked" in (listing.description or "")
 
