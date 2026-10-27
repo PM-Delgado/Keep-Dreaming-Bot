@@ -1,25 +1,33 @@
 import asyncio
 import logging
 
-import discord
-
 from bot.app import KDBot
-from bot.config import ConfigError, load_settings
+from bot.config import ConfigError, Settings, load_settings
+from bot.logging_setup import setup_logging
 
 log = logging.getLogger("bot")
 
 
-async def main() -> None:
-    settings = load_settings()
+async def run(settings: Settings) -> None:
     async with KDBot(settings) as bot:
         await bot.start(settings.token)
 
 
-if __name__ == "__main__":
-    discord.utils.setup_logging(level=logging.INFO)
+def main() -> None:
     try:
-        asyncio.run(main())
+        settings = load_settings()
     except ConfigError as exc:
         raise SystemExit(f"Configuration error: {exc}") from None
+    log_file = setup_logging(settings.log_level, settings.log_dir)
+    log.info("Logging to %s", log_file or "the console only")
+    try:
+        asyncio.run(run(settings))
     except KeyboardInterrupt:
         log.info("Bot stopped by user.")
+    except Exception:
+        log.critical("The bot crashed", exc_info=True)
+        raise SystemExit(1) from None
+
+
+if __name__ == "__main__":
+    main()

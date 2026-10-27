@@ -7,6 +7,8 @@
     python -m bot.features.roster reset                  # show what would be wiped
     python -m bot.features.roster reset --yes            # wipe ALL league data (backup first)
     python -m bot.features.roster reset --keep-roster --yes   # wipe only games, keep the roster
+    python -m bot.features.roster production             # show what going live would change
+    python -m bot.features.roster production --yes       # clean database for deployment
 
 The database is `DB_PATH` (default data/kdbot.sqlite3); change it with --db. Stop the bot first.
 Every command that writes makes a backup copy next to the database (`*.sqlite3.bak-...`).
@@ -26,6 +28,7 @@ from bot.features.riot.client import RiotClient
 from bot.features.roster.backup import backup_database
 from bot.features.roster.games import Clock, Playground, PlaygroundError
 from bot.features.roster.loader import RosterEntry, RosterError, load_roster, strength_of
+from bot.features.roster.production import plan_production, prepare_production
 from bot.features.roster.report import format_game, load_games, summarize
 from bot.features.roster.repository import RosterRepository
 from bot.features.roster.reset import plan_reset, reset_league
@@ -68,6 +71,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="only remove games, lobbies and mock players; keep players, ranks and Riot accounts",
     )
     reset.add_argument("--yes", action="store_true", help="really do it (default: only show)")
+    production = sub.add_parser(
+        "production",
+        help="make the database ready to go live: roster only, no games, no /puta picks",
+    )
+    production.add_argument("--no-riot", action="store_true", help="do not link Riot accounts")
+    production.add_argument(
+        "--yes", action="store_true", help="really do it (default: only show the plan)"
+    )
     return parser.parse_args(argv)
 
 
@@ -202,6 +213,77 @@ async def run_reset(args: argparse.Namespace, db_path: Path) -> int:
     return 0
 
 
+async def run_production(
+    args: argparse.Namespace, entries: list[RosterEntry], db_path: Path
+) -> int:
+    settings = settings_or_none()
+    admin_id = args.admin_id or (min(settings.admin_ids) if settings and settings.admin_ids else 0)
+    if not admin_id:
+        print("No admin: set ADMIN_USER_IDS or pass --admin-id.")
+        return 2
+    key = settings.riot_api_key if settings else None
+    link_riot = not args.no_riot
+    if args.yes and link_riot and not key:
+        print("RIOT_API_KEY is not set, so the Riot accounts cannot be linked (or use --no-riot).")
+        return 2
+    db = Database(str(db_path))
+    await db.connect()
+    client = RiotClient(key) if key and link_riot and args.yes else None
+    try:
+        repo = RosterRepository(db)
+        before = (await plan_production(repo, entries)).before
+        print(
+            f"Now: {before.players} players, {before.mock_players} mock players,"
+            f" {before.matches} games, {before.lobbies} lobbies,"
+            f" {before.riot_accounts} Riot accounts."
+        )
+        print(
+            f"/puta: {before.names} names and {before.phrases} phrases (kept),"
+            f" {before.picks} daily picks (cleared)."
+        )
+        print(f"After: the {len(entries)} players of the roster file and nothing else.")
+        if not args.yes:
+            print("Nothing changed. Add --yes to do it (a backup is made first).")
+            return 0
+        print(f"Backup: {backup_database(db_path, 'pre-production')}")
+        stack = Stack(
+            db,
+            frozenset({admin_id}),
+            riot_client=client,
+            default_platform=settings.riot_default_platform if settings else "euw1",
+            sync_history=False,
+        )
+        result = await prepare_production(
+            db,
+            stack,
+            entries,
+            admin_id,
+            link_riot=link_riot,
+            progress=lambda line: print(line, flush=True),
+        )
+    finally:
+        if client is not None:
+            await client.close()
+        await db.close()
+    print("\nVerification:")
+    for check in result.checks:
+        print(f"  {'OK   ' if check.ok else 'FAIL '} {check.label:<16} {check.detail}")
+    problems = result.seeded.problems if link_riot else []
+    for line in problems:
+        print(f"  CHECK  {line}")
+    if not link_riot:
+        print("  note: Riot accounts were not linked (--no-riot); /riot link adds them later.")
+    if result.after.champions == 0:
+        print("  note: no champion list yet; the bot loads its bundled one on first start.")
+    if not result.ok:
+        print("\nNot ready: fix the FAIL lines above (the backup has the previous state).")
+        return 1
+    print(
+        "\nReady." + (" The bot downloads the ranked history when it starts." if link_riot else "")
+    )
+    return 1 if problems else 0
+
+
 def run_matches(args: argparse.Namespace, db_path: Path) -> int:
     if not db_path.exists():
         print(f"{db_path} does not exist.")
@@ -258,6 +340,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "seed":
             return asyncio.run(run_seed(args, entries, db_path))
+        if args.command == "production":
+            return asyncio.run(run_production(args, entries, db_path))
         return asyncio.run(run_games(args, entries, db_path))
     except PlaygroundError as exc:
         print(exc)

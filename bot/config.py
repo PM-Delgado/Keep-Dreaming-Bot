@@ -31,6 +31,9 @@ class Settings:
     # Champion and role icons (Riot images) shown as application emojis. The name is historical:
     # it also switches the role icons. On by default; off stops uploading and showing them.
     champion_icons: bool = True
+    # Logging: console always; also a daily rotating file in `log_dir` (empty LOG_DIR = no file).
+    log_level: str = "INFO"
+    log_dir: Path | None = Path("logs")
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -73,7 +76,24 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         in ("1", "true", "yes", "on"),
         ready_check_seconds=_parse_ready_seconds(env.get("READY_CHECK_SECONDS", "")),
         champion_icons=_truthy(env.get("CHAMPION_ICONS", "true")),
+        log_level=_parse_log_level(env.get("LOG_LEVEL", "")),
+        log_dir=_parse_log_dir(env.get("LOG_DIR", "logs")),
     )
+
+
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def _parse_log_level(raw: str) -> str:
+    level = raw.strip().upper() or "INFO"
+    if level not in LOG_LEVELS:
+        raise ConfigError(f"LOG_LEVEL must be one of {', '.join(LOG_LEVELS)}.")
+    return level
+
+
+def _parse_log_dir(raw: str) -> Path | None:
+    raw = raw.strip()
+    return Path(raw) if raw else None
 
 
 def _parse_ready_seconds(raw: str) -> int:

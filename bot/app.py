@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot import interaction_log
 from bot.config import Settings
 from bot.db import Database
 
@@ -23,6 +24,10 @@ EXTENSIONS = (
 )
 
 
+def _on_off(flag: object) -> str:
+    return "on" if flag else "off"
+
+
 class KDBot(commands.Bot):
     def __init__(self, settings: Settings) -> None:
         # Slash commands only: no prefix commands, so no privileged intents are needed.
@@ -30,9 +35,21 @@ class KDBot(commands.Bot):
         self.settings = settings
         self.db = Database(settings.db_path)
         self.tree.on_error = self.on_tree_error
+        self.tree.interaction_check = self.on_tree_check
+
+    def describe_settings(self) -> str:
+        """The switches that change what the bot does, for the startup log (never the secrets)."""
+        s = self.settings
+        return (
+            f"guild={s.guild_id} admins={len(s.admin_ids)} riot={_on_off(s.riot_api_key)}"
+            f" mock_players={_on_off(s.mock_players)} icons={_on_off(s.champion_icons)}"
+            f" ready_check={s.ready_check_seconds}s log_level={s.log_level}"
+        )
 
     async def setup_hook(self) -> None:
+        log.info("Starting KD Bot: %s", self.describe_settings())
         await self.db.connect()
+        log.info("Database ready: %s", await self.db.describe())
         for extension in EXTENSIONS:
             await self.load_extension(extension)
             log.info("Loaded extension %s", extension)
@@ -46,19 +63,48 @@ class KDBot(commands.Bot):
         )
 
     async def on_ready(self) -> None:
-        log.info("Logged in as %s", self.user)
+        guild = self.get_guild(self.settings.guild_id)
+        if guild is None:
+            log.warning(
+                "Logged in as %s, but the bot is not in guild %d: commands will not appear.",
+                self.user,
+                self.settings.guild_id,
+            )
+            return
+        log.info(
+            "Ready: logged in as %s, serving %s (%d members)",
+            self.user,
+            guild.name,
+            guild.member_count,
+        )
 
     async def close(self) -> None:
+        log.info("Shutting down.")
         await super().close()
         await self.db.close()
+        log.info("Database closed. Bye.")
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        interaction_log.log_received(interaction)
+
+    async def on_app_command_completion(
+        self,
+        interaction: discord.Interaction,
+        command: app_commands.Command | app_commands.ContextMenu,
+    ) -> None:
+        interaction_log.log_completed(interaction)
+
+    async def on_tree_check(self, interaction: discord.Interaction) -> bool:
+        interaction_log.mark_received(interaction)
+        return True
 
     async def on_tree_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
+        interaction_log.log_failed(interaction, error)
         if isinstance(error, app_commands.CheckFailure):
             message = "⛔ Não tens permissão para usar este comando."
         else:
-            log.error("Unhandled error in command %s", interaction.command, exc_info=error)
             message = "💥 Ocorreu um erro inesperado. Tenta novamente mais tarde."
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)

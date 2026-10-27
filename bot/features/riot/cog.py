@@ -29,6 +29,7 @@ from bot.features.riot.service import (
     RankOutcome,
     RiotService,
 )
+from bot.interaction_log import log_refusal
 from bot.permissions import is_admin
 
 if TYPE_CHECKING:
@@ -264,6 +265,7 @@ class Riot(commands.Cog):
             profile_player = await self.service.players.require(target.id)
             rows = await self.service.accounts(target.id)
         except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
@@ -310,6 +312,7 @@ class Riot(commands.Cog):
         try:
             view = await self.service.recent_history(target.id, riot_id=riot_id)
         except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         ids = sorted({g.champion for g in view.games if g.champion})

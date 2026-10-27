@@ -1,6 +1,7 @@
 """Rating business rules: seeds, rank signals, adjustments, replay-backed caches, inspection."""
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -27,6 +28,8 @@ from bot.features.ratings.rank import (
 )
 from bot.features.ratings.replay import MatchIn, replay
 from bot.features.ratings.repository import RatingRepository, StoredRating
+
+log = logging.getLogger(__name__)
 
 
 class RatingError(ValueError):
@@ -176,6 +179,14 @@ class RatingService:
         )
         after = (await self.resolve(player_id)).rank
         await self._maybe_reseed(player_id, before, after, created_by)
+        log.info(
+            "Rank signal for player %s: %s %s %s %s",
+            player_id,
+            source,
+            status,
+            tier or "-",
+            division or "",
+        )
         return signal_id
 
     async def _maybe_reseed(

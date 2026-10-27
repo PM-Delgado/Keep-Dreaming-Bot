@@ -1,6 +1,7 @@
 """SQL access for the name-of-the-day feature."""
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ from pathlib import Path
 from bot.db import Database
 
 SEED_DIR = Path(__file__).parent / "seed"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -34,11 +37,13 @@ class NameDayRepository:
             await conn.executemany(
                 "INSERT OR IGNORE INTO names (name) VALUES (?)", [(n,) for n in names]
             )
+            log.info("Seeded %d names for /puta", len(names))
         if await self._count("phrases") == 0:
             phrases = json.loads((seed_dir / "phrases.json").read_text(encoding="utf-8"))
             await conn.executemany(
                 "INSERT OR IGNORE INTO phrases (text) VALUES (?)", [(p,) for p in phrases]
             )
+            log.info("Seeded %d phrases for /puta", len(phrases))
         await conn.commit()
 
     async def list_names(self) -> list[tuple[int, str]]:

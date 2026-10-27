@@ -16,6 +16,7 @@ from bot.features.players.text import tier_color
 from bot.features.stats.render import build_board_embed, build_history_embed, build_stats_embed
 from bot.features.stats.repository import StatsRepository
 from bot.features.stats.service import KDA, MIN_BOARD_GAMES, RANK, WIN_RATE, StatsService
+from bot.interaction_log import log_refusal
 
 if TYPE_CHECKING:
     from bot.app import KDBot
@@ -78,7 +79,8 @@ class Stats(commands.Cog):
         target = user or interaction.user
         try:
             history = await self.service.history(interaction.guild_id, target.id)
-        except PlayerError:
+        except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
             return
         icons, names = await self._champion_maps([g.champion for g in history.lines if g.champion])
@@ -104,7 +106,8 @@ class Stats(commands.Cog):
         target = user or interaction.user
         try:
             stats = await self.service.stats(interaction.guild_id, target.id)
-        except PlayerError:
+        except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
             return
         icons, names = await self._champion_maps(

@@ -416,6 +416,10 @@ class _Connection(aiosqlite.Connection):
         await super().commit()
 
 
+# Tables whose size is shown at startup (fixed names, never user input).
+SUMMARY_TABLES = ("names", "phrases", "picks", "players", "lobbies", "matches", "champions")
+
+
 class Database:
     def __init__(self, path: Path | str) -> None:
         self.path = str(path)
@@ -455,3 +459,14 @@ class Database:
         for target, script in enumerate(MIGRATIONS[version:], start=version + 1):
             log.info("Migrating database to version %d", target)
             await self.conn.executescript(f"BEGIN;{script};PRAGMA user_version = {target};COMMIT;")
+
+    async def describe(self) -> str:
+        """Location, schema version and size of the main tables, for the startup log."""
+        async with self.conn.execute("PRAGMA user_version") as cur:
+            row = await cur.fetchone()
+        counts = []
+        for table in SUMMARY_TABLES:
+            async with self.conn.execute(f"SELECT COUNT(*) FROM {table}") as cur:  # noqa: S608
+                row_count = await cur.fetchone()
+            counts.append(f"{table}={row_count[0] if row_count else 0}")
+        return f"{self.path} schema v{row[0] if row else 0}/{len(MIGRATIONS)} " + " ".join(counts)

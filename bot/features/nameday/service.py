@@ -1,5 +1,6 @@
 """Name-of-the-day rules. No Discord imports; clock and RNG are injectable for tests."""
 
+import logging
 import random
 from collections.abc import Callable
 from datetime import datetime
@@ -8,6 +9,8 @@ from zoneinfo import ZoneInfo
 from bot.features.nameday.repository import NameDayRepository, Pick
 
 LISBON = ZoneInfo("Europe/Lisbon")
+
+log = logging.getLogger(__name__)
 
 
 class NameDayService:
@@ -40,6 +43,7 @@ class NameDayService:
         name_id, name = self.rng.choice(names)
         phrase = self.rng.choice(phrases).replace("{name}", name)
         await self.repo.add_pick(today, name_id, phrase, now)
+        log.info("Name of the day for %s picked: %s", today, name)
         # Re-read so the stored pick is returned even if another writer got there first.
         return await self.repo.get_pick(today)
 
