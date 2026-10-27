@@ -107,16 +107,27 @@ def format_count(value: int) -> str:
 
 
 def format_line(
-    entry: HistoryEntry, now: datetime, show_account: bool = False, details: bool = False
+    entry: HistoryEntry,
+    now: datetime,
+    show_account: bool = False,
+    details: bool = False,
+    champion_icon: str = "",
+    role_icon: str = "",
+    champion_name: str | None = None,
 ) -> str:
-    """One game: result, champion, role, KDA, CS, duration, age (+ optional extra stats)."""
-    role = ROLE_NAMES_PT.get(entry.role or "", "—")
+    """One game: result, champion, role, KDA, CS, duration, age (+ optional extra stats).
+
+    The champion and the role are shown as icons when given, else as text (`champion_name` is the
+    display name; the entry only has Riot's id).
+    """
+    result = RESULT_EMOJI[entry.result]
     kda = f"{entry.kills}/{entry.deaths}/{entry.assists} ({entry.kda:.1f} KDA)"
-    parts = [
-        f"{RESULT_EMOJI[entry.result]} **{entry.champion}**",
-        role,
-        kda,
-    ]
+    if champion_icon and role_icon:
+        parts = [f"{result} {champion_icon} {role_icon}", kda]
+    else:
+        champion = champion_icon or f"**{champion_name or entry.champion}**"
+        role = role_icon or ROLE_NAMES_PT.get(entry.role or "", "—")
+        parts = [f"{result} {champion}", role, kda]
     if entry.cs is not None:
         per_min = entry.cs_per_min
         parts.append(f"{entry.cs} CS" + (f" ({per_min:.1f}/min)" if per_min is not None else ""))

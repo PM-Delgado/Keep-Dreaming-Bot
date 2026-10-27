@@ -304,6 +304,14 @@ MIGRATIONS: list[str] = [
         emoji_name  TEXT NOT NULL
     );
     """,
+    # 11: the same for the five role icons (bundled PNGs, uploaded once as application emojis).
+    """
+    CREATE TABLE role_emojis (
+        role       TEXT PRIMARY KEY CHECK (role IN ('TOP','JUNGLE','MID','ADC','SUPPORT')),
+        emoji_id   INTEGER NOT NULL,
+        emoji_name TEXT NOT NULL
+    );
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

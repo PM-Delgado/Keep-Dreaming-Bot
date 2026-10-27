@@ -20,10 +20,10 @@ from bot.features.champions.cog import Champions
 from bot.features.champions.repository import SEED_FILE, ChampionRepository
 from bot.features.champions.service import (
     ChampionService,
-    IconUploadError,
     emoji_name,
     normalise,
 )
+from bot.features.icons.upload import IconUploadError
 
 
 def dragon(patch: str = "99.1.1", extra: dict[str, str] | None = None):

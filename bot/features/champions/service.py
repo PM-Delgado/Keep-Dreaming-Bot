@@ -3,7 +3,7 @@
 import logging
 import re
 import unicodedata
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 
 from bot.features.champions.client import (
     Champion,
@@ -16,19 +16,12 @@ from bot.features.champions.client import (
     icon_url,
 )
 from bot.features.champions.repository import ChampionRepository
+from bot.features.icons.upload import IconUploadError, UploadIcon
 
 log = logging.getLogger(__name__)
 
 EMOJI_PREFIX = "champ_"  # application emoji names: letters, digits and underscores only
 MAX_ICON_FAILURES = 3  # consecutive failed uploads before a sync gives up until the next run
-
-
-class IconUploadError(Exception):
-    """An icon could not be uploaded (the caller turns Discord's errors into this)."""
-
-
-# name, PNG bytes -> the new emoji's id
-UploadIcon = Callable[[str, bytes], Awaitable[int]]
 
 
 def emoji_name(champion_id: str) -> str:

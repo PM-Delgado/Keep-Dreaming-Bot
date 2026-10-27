@@ -99,9 +99,8 @@ is small and tested, so a better signal can reuse it.
 ## Ideas to test next
 
 * **A stronger per-game performance signal** than win/loss, once kills/deaths/assists are recorded
-  (M3b): a game's KDA says more about a player's day than a coin-flip result does.
-## Ideas to test next
-
+  (M3b, now recorded and validated per game): a game's KDA says more about a player's day than a
+  coin-flip result does.
 * Riot ranked history (recent win rate, games played, LP trend) as an extra prior; stale or
   inactive ranks widen the uncertainty.
 * Adaptive uncertainty: raise a player's sigma when they keep beating or losing to the prediction.

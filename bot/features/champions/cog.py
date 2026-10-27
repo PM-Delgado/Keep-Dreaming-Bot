@@ -8,11 +8,11 @@ lobby cog (next to /match) and use `service`.
 import logging
 from typing import TYPE_CHECKING
 
-import discord
 from discord.ext import commands, tasks
 
 from bot.features.champions.repository import ChampionRepository
-from bot.features.champions.service import ChampionService, IconUploadError
+from bot.features.champions.service import ChampionService
+from bot.features.icons.upload import application_emojis
 
 if TYPE_CHECKING:
     from bot.app import KDBot
@@ -48,14 +48,7 @@ class Champions(commands.Cog):
         if not self.service.icons:
             return
         try:
-            existing = {e.name: e.id for e in await self.bot.fetch_application_emojis()}
-
-            async def upload(name: str, image: bytes) -> int:
-                try:
-                    return (await self.bot.create_application_emoji(name=name, image=image)).id
-                except discord.HTTPException as exc:
-                    raise IconUploadError(f"Discord answered {exc.status}") from exc
-
+            existing, upload = await application_emojis(self.bot)
             await self.service.sync_icons(existing, upload)
         except Exception:
             log.exception("Champion icon sync failed")

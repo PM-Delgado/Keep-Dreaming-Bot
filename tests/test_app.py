@@ -37,9 +37,10 @@ async def test_registers_exactly_the_expected_commands():
     assert EXTENSIONS == (
         "bot.features.nameday.cog",
         "bot.features.admin.cog",
+        "bot.features.icons.cog",
+        "bot.features.champions.cog",
         "bot.features.players.cog",
         "bot.features.riot.cog",
-        "bot.features.champions.cog",
         "bot.features.lobby.cog",
     )
 

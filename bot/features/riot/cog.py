@@ -5,6 +5,7 @@ rest of the bot (manual ranks, proficiency, ratings) is unaffected.
 """
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.features.champions.service import ChampionService
+from bot.features.icons.roles import RoleIconService
 from bot.features.players.service import PlayerError
 from bot.features.ratings.service import RatingError
 from bot.features.riot.client import RiotClient
@@ -77,10 +80,29 @@ def build_list_embed(
     return embed
 
 
-def build_history_embed(view: HistoryView, now: datetime) -> discord.Embed:
-    """Presentation of /riot history. Restyle here; the numbers come from history.py."""
+def build_history_embed(
+    view: HistoryView,
+    now: datetime,
+    champion_names: Mapping[str, str] | None = None,
+    champion_icons: Mapping[str, str] | None = None,
+    role_icons: Mapping[str, str] | None = None,
+) -> discord.Embed:
+    """Presentation of /riot history. Restyle here; the numbers come from history.py.
+
+    The champion maps are keyed by Riot's champion id, the role icons by role; both are optional.
+    """
     entries = [to_entry(g) for g in view.games]
-    lines = [format_line(e, now, show_account=view.multiple_accounts) for e in entries]
+    lines = [
+        format_line(
+            e,
+            now,
+            show_account=view.multiple_accounts,
+            champion_icon=(champion_icons or {}).get(e.champion, ""),
+            role_icon=(role_icons or {}).get(e.role or "", ""),
+            champion_name=(champion_names or {}).get(e.champion),
+        )
+        for e in entries
+    ]
     scope = f" ({view.account.riot_id})" if view.account else ""
     embed = discord.Embed(
         title=f"Últimos {len(entries)} jogos ranked Solo/Duo de {view.nickname}{scope}",
@@ -99,9 +121,17 @@ def build_history_embed(view: HistoryView, now: datetime) -> discord.Embed:
 
 
 class Riot(commands.Cog):
-    def __init__(self, bot: "KDBot", service: RiotService) -> None:
+    def __init__(
+        self,
+        bot: "KDBot",
+        service: RiotService,
+        icons: RoleIconService | None = None,
+        champions: ChampionService | None = None,
+    ) -> None:
         self.bot = bot
         self.service = service
+        self.icons = icons  # role icons
+        self.champions = champions  # champion names and icons
 
     riot = app_commands.Group(name="riot", description="Contas Riot ligadas aos jogadores.")
 
@@ -264,8 +294,17 @@ class Riot(commands.Cog):
         except (PlayerError, RatingError) as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+        ids = sorted({g.champion for g in view.games if g.champion})
+        names = await self.champions.names(ids) if self.champions else {}
+        icons = await self.champions.icon_markup(ids) if self.champions else {}
         await interaction.response.send_message(
-            embed=build_history_embed(view, datetime.now(UTC)),
+            embed=build_history_embed(
+                view,
+                datetime.now(UTC),
+                names,
+                icons,
+                self.icons.markup() if self.icons else None,
+            ),
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
@@ -310,7 +349,14 @@ async def setup(bot: "KDBot") -> None:
     players_cog.ratings.main_puuid_of = service.main_puuid_of
     players_cog.players.role_estimator = service.role_estimates
     players_cog.players.account_labeler = service.account_labels
-    await bot.add_cog(Riot(bot, service))
+    await bot.add_cog(
+        Riot(
+            bot,
+            service,
+            getattr(bot.get_cog("Icons"), "roles", None),
+            getattr(bot.get_cog("Champions"), "service", None),
+        )
+    )
     resumed = await service.resume_unfinished_syncs()
     if resumed:
         log.info("Resuming the ranked-history sync of %d account(s).", resumed)

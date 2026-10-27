@@ -241,3 +241,16 @@ async def test_admin_register_is_denied_for_non_admins():
         for ext in EXTENSIONS:
             await bot.unload_extension(ext)
         await bot.db.close()
+
+
+async def test_profile_roles_get_their_icon_in_front_when_it_exists(stack):
+    _, _, players, _ = stack
+    await players.register(1, "Ana")
+    await players.set_declared(1, "MID", 4)
+    profile = await players.profile(1)
+    plain = embed_text(build_profile_embed(profile, DEFAULT_LADDER))
+    assert "<:role_mid" not in plain and "**Mid**: 4/5 (declarado)" in plain
+    icons = {"MID": "<:role_mid:8>"}
+    text = embed_text(build_profile_embed(profile, DEFAULT_LADDER, icons))
+    assert "<:role_mid:8> **Mid**: 4/5 (declarado)" in text
+    assert "**Top**: —" in text  # no icon for Top: just the name, as before

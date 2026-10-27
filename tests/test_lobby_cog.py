@@ -5,10 +5,11 @@ from typing import Any
 
 import discord
 import pytest_asyncio
-from lobby_fakes import ADMIN, CHANNEL, GUILD, LobbyStack, sides_of, start_game
+from lobby_fakes import ADMIN, CHANNEL, GUILD, START, LobbyStack, sides_of, start_game
 
 from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
+from bot.features.icons.roles import RoleEmojiRepository, RoleIconService
 from bot.features.lobby.cog import Lobby
 from bot.features.lobby.mock import MockPlayers
 from bot.features.lobby.render import (
@@ -449,6 +450,56 @@ def test_off_role_players_are_flagged_and_best_role_players_are_not():
     assert "**Top** — Rui · 4/5" in text
 
 
+def test_team_lines_use_the_role_icon_instead_of_the_role_name():
+    on_best = SimpleNamespace(player_id=1, nickname="Ana", role="MID", fit=5, best=5)
+    second = SimpleNamespace(player_id=2, nickname="Rui", role="TOP", fit=4, best=5)
+    icons = {"MID": "<:role_mid:8>"}
+    lines = team_text([on_best, second], icons).splitlines()  # type: ignore[list-item]
+    assert lines[0] == "<:role_mid:8> Ana"  # no word, no dash
+    assert lines[1] == "**Top** — Rui · 4/5"  # no Top icon yet: the name, plus the note
+
+
+async def test_the_lobby_message_and_match_show_use_role_icons_once_uploaded(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    await env.stack.matches.enter_stats(sides["blue"][0], "Kaisa", 8, 2, 11, match_id)
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    assert "**Top** — " in text_of(ix.sent[0]["embed"])  # no icons uploaded: names
+
+    async def upload(name: str, image: bytes) -> int:
+        return 100 + len(name)
+
+    env.cog.icons = RoleIconService(RoleEmojiRepository(env.stack.db))
+    await env.cog.icons.sync({}, upload)
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    text = text_of(ix.sent[0]["embed"])
+    top = env.cog.icons.markup()["TOP"]
+    assert f"{top} Player" in text
+    for word in ("**Top**", "**Jungle**", "**Mid**", "**ADC**", "**Suporte**"):
+        assert word not in text
+
+    snapshot = await env.stack.lobbies.snapshot((await env.stack.match_repo.get(match_id)).lobby_id)  # type: ignore[union-attr]
+    lobby_text = text_of(env.cog.message_kwargs(snapshot)["embed"])
+    assert top in lobby_text and "**Top**" not in lobby_text
+
+
+async def test_match_show_shows_the_role_icon_of_the_role_actually_played(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    player = sides["blue"][0]  # the balancer put them somewhere; an admin says they played Support
+    await env.stack.matches.set_stats(ADMIN, match_id, player, "Lux", 1, 2, 3, "SUPPORT")
+
+    async def upload(name: str, image: bytes) -> int:
+        return 100 + len(name)
+
+    env.cog.icons = RoleIconService(RoleEmojiRepository(env.stack.db))
+    await env.cog.icons.sync({}, upload)
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    support = env.cog.icons.markup()["SUPPORT"]
+    assert f"{support} Player {player:02d}" in text_of(ix.sent[0]["embed"])
+
+
 async def test_the_proposal_embed_notes_who_plays_off_their_best_role(env):
     lobby_id, _ = await open_as(env)
     await env.mock.create(9, ADMIN, main_role="MID")  # everyone mains MID: eight must move
@@ -725,7 +776,8 @@ async def test_match_show_lists_teams_and_history(env):
     assert "Resultado por confirmar" in text
     assert "Vencedor: **Azul**" in text
     assert "Player 01" in text
-    assert "reportou" in text
+    assert "Histórico" not in text and "reportou" not in text  # no audit trail in the embed
+    assert not ix.sent[0]["embed"].footer.text  # nothing confirmed yet
     ix = FakeInteraction(1)
     await env.cog.match_show.callback(env.cog, ix, 999)  # type: ignore[arg-type]
     assert "Não encontrei" in ix.sent[0]["content"]
@@ -838,14 +890,22 @@ async def test_match_stats_records_pending_stats_and_match_show_marks_them(env):
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
     text = text_of(ix.sent[0]["embed"])
     assert "Kai'Sa 8/2/11 ⏳" in text
-    assert "registou stats de" in text
+    assert "Histórico" not in text
+    assert ix.sent[0]["embed"].footer.text == (
+        f"Resultado confirmado por Player {ADMIN} · 1 por validar"
+    )
     await env.stack.matches.validate_stats(ADMIN, match_id)
     ix = FakeInteraction(1)
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
-    assert "Kai'Sa 8/2/11 ✅" in text_of(ix.sent[0]["embed"])
+    embed = ix.sent[0]["embed"]
+    assert "Kai'Sa 8/2/11" in text_of(embed)
+    assert "⏳" not in text_of(embed) and "✅" not in text_of(embed)  # no marks: the footer says it
+    assert embed.footer.text == (
+        f"Resultado confirmado por Player {ADMIN} · KDAs validados por Player {ADMIN}"
+    )
 
 
-async def test_match_show_puts_the_champion_icon_next_to_the_player_and_the_riot_notice(env):
+async def test_match_show_puts_the_champion_icon_next_to_the_player(env):
     match_id, sides = await confirmed_game_with_admin(env)
     await env.stack.matches.enter_stats(sides["blue"][0], "Kaisa", 8, 2, 11, match_id)
 
@@ -853,7 +913,6 @@ async def test_match_show_puts_the_champion_icon_next_to_the_player_and_the_riot
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
     embed = ix.sent[0]["embed"]
     assert "Kai'Sa 8/2/11" in text_of(embed) and "<:champ_" not in text_of(embed)
-    assert not embed.footer.text  # no Riot image on screen, no notice needed
 
     async def upload(name: str, image: bytes) -> int:
         return 4242
@@ -866,13 +925,14 @@ async def test_match_show_puts_the_champion_icon_next_to_the_player_and_the_riot
     ix = FakeInteraction(1)
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
     embed = ix.sent[0]["embed"]
-    assert " · <:champ_Kaisa:4242> Kai'Sa 8/2/11 ⏳" in text_of(embed)
-    assert "isn't endorsed by Riot Games" in embed.footer.text
+    assert " — <:champ_Kaisa:4242> 8/2/11 ⏳" in text_of(embed)
+    assert "Kai'Sa" not in text_of(embed)  # the icon replaces the champion's name
+    assert "Riot" not in (embed.footer.text or "")  # the notice lives on /profile, not here
 
     env.stack.champions.icons = False  # the switch hides them again
     ix = FakeInteraction(1)
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
-    assert "<:champ_" not in text_of(ix.sent[0]["embed"]) and not ix.sent[0]["embed"].footer.text
+    assert "<:champ_" not in text_of(ix.sent[0]["embed"])
 
 
 async def test_match_stats_errors_are_private_and_explain_themselves(env):
@@ -954,6 +1014,23 @@ async def test_mock_players_can_enter_and_validate_stats_for_a_test_game(env):
     assert await env.stack.match_repo.get_by_lobby(lobby_id) is None
 
 
+async def test_the_footer_names_the_admins_who_validated_and_counts_what_is_left(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    await env.stack.register(1, start=ADMIN - 1)  # a second admin
+    env.stack.matches.is_admin = lambda user_id: user_id in (ADMIN, ADMIN - 1)
+    blue = sides["blue"]
+    for player in blue[:3]:
+        await env.stack.matches.enter_stats(player, "Ahri", 1, 2, 3, match_id)
+    await env.stack.matches.validate_stats(ADMIN, match_id, blue[0])
+    await env.stack.matches.validate_stats(ADMIN - 1, match_id, blue[1])
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    assert ix.sent[0]["embed"].footer.text == (
+        f"Resultado confirmado por Player {ADMIN} · "
+        f"KDAs validados por Player {ADMIN - 1}, Player {ADMIN} · 1 por validar"
+    )
+
+
 # --- extension wiring ----
 
 
@@ -1007,3 +1084,39 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
         for ext in reversed(EXTENSIONS):
             await bot.unload_extension(ext)
         await bot.db.close()
+
+
+def test_validation_footer_covers_every_state(env):
+    from dataclasses import replace
+
+    from bot.features.lobby.render import validation_footer
+    from bot.features.matches.repository import MatchRow
+
+    base = MatchRow(
+        id=1,
+        lobby_id=1,
+        guild_id=GUILD,
+        status="confirmed",
+        winner="blue",
+        expected_blue_win=0.5,
+        created_at=START,
+        reported_by=None,
+        reported_at=None,
+        confirmed_by=None,
+        confirmed_at=None,
+        auto_confirmed=False,
+        contested=False,
+        voided_by=None,
+        voided_at=None,
+        void_reason=None,
+        reminder_sent=False,
+    )
+    assert validation_footer(base, "Ana", [], 0) == "Resultado confirmado por Ana"
+    assert validation_footer(base, None, [], 0) == "Resultado confirmado por ?"
+    auto = replace(base, auto_confirmed=True)
+    assert validation_footer(auto, None, ["Ana"], 0) == (
+        "Resultado confirmado automaticamente · KDAs validados por Ana"
+    )
+    assert validation_footer(base, "Ana", [], 3) == "Resultado confirmado por Ana · 3 por validar"
+    for status in ("in_progress", "reported", "voided"):
+        assert validation_footer(replace(base, status=status), "Ana", ["Ana"], 1) is None

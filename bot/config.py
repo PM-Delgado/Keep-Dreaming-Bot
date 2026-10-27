@@ -28,8 +28,8 @@ class Settings:
     # keep them off in production.
     mock_players: bool = False
     ready_check_seconds: int = 120
-    # Champion icons (Riot Data Dragon images) shown as application emojis next to players' stats.
-    # On by default; turn off to stop uploading and showing them (docs/riot-policy.md).
+    # Champion and role icons (Riot images) shown as application emojis. The name is historical:
+    # it also switches the role icons. On by default; off stops uploading and showing them.
     champion_icons: bool = True
 
 

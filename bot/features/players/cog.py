@@ -5,12 +5,14 @@ ratings feature has no commands of its own.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.features.icons.roles import RoleIconService
 from bot.features.players.admin import InhouseAdmin
 from bot.features.players.choices import (
     DIVISION_CHOICES,
@@ -62,27 +64,37 @@ def league_rank_text(profile: Profile) -> str:
     return f"{rank.label()} ({SOURCE_PT.get(rank.source, 'declarado')})"
 
 
-def build_profile_embed(profile: Profile, ladder: LadderConfig) -> discord.Embed:
+def build_profile_embed(
+    profile: Profile, ladder: LadderConfig, roles: Mapping[str, str] | None = None
+) -> discord.Embed:
     embed = discord.Embed(title=profile.player.nickname, color=discord.Color.blurple())
     embed.add_field(name="Rank do grupo", value=in_house_rank_text(profile, ladder), inline=False)
     embed.add_field(name="Rank League (referência)", value=league_rank_text(profile), inline=False)
     if profile.accounts:
         embed.add_field(name="Contas Riot", value="\n".join(profile.accounts), inline=False)
-    roles = []
+    lines = []
     for line in profile.roles:
         value = line.proficiency.value
         text = "—" if value is None else f"{value}/5 ({SOURCE_PT[line.proficiency.source]})"
-        roles.append(f"**{ROLE_NAMES_PT[line.role]}**: {text}")
-    embed.add_field(name="Roles", value="\n".join(roles), inline=False)
+        icon = (roles or {}).get(line.role)
+        lines.append(f"{icon + ' ' if icon else ''}**{ROLE_NAMES_PT[line.role]}**: {text}")
+    embed.add_field(name="Roles", value="\n".join(lines), inline=False)
     embed.set_footer(text=FOOTER)
     return embed
 
 
 class Players(commands.Cog):
-    def __init__(self, bot: "KDBot", players: PlayerService, ratings: RatingService) -> None:
+    def __init__(
+        self,
+        bot: "KDBot",
+        players: PlayerService,
+        ratings: RatingService,
+        icons: RoleIconService | None = None,
+    ) -> None:
         self.bot = bot
         self.players = players
         self.ratings = ratings
+        self.icons = icons  # role icons; None or empty means role names only
 
     profile = app_commands.Group(name="profile", description="O teu perfil in-house.")
 
@@ -110,7 +122,9 @@ class Players(commands.Cog):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
-            embed=build_profile_embed(profile, self.ratings.ladder),
+            embed=build_profile_embed(
+                profile, self.ratings.ladder, self.icons.markup() if self.icons else None
+            ),
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
@@ -165,5 +179,5 @@ async def setup(bot: "KDBot") -> None:
     players = PlayerService(PlayerRepository(bot.db), ratings)
     if await ratings.rebuild_if_stale():
         log.info("Rating caches rebuilt (algorithm or ladder version changed).")
-    await bot.add_cog(Players(bot, players, ratings))
+    await bot.add_cog(Players(bot, players, ratings, getattr(bot.get_cog("Icons"), "roles", None)))
     await bot.add_cog(InhouseAdmin(bot, players, ratings))
