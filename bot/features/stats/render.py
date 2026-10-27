@@ -1,7 +1,8 @@
 """Embeds for /history, /stats and /leaderboard. Pure: icons and names are passed in.
 
-Every icon falls back to its name, so a missing upload never leaves a bare line. No rating (raw
-or as a progress bar) is shown anywhere; the ladder board shows the visible tier and division.
+Every icon falls back to its name, so a missing upload never leaves a bare line. No raw rating is
+shown anywhere; the ladder board shows the visible tier and division with a progress bar toward
+the next division, which is also what orders players inside the same division.
 """
 
 from collections.abc import Mapping, Sequence
@@ -12,7 +13,7 @@ import discord
 from bot.features.icons.roles import role_label
 from bot.features.lobby.render import SIDE_EMOJI
 from bot.features.matches.service import kda_text
-from bot.features.players.cog import FOOTER
+from bot.features.players.cog import FOOTER, progress_bar
 from bot.features.players.proficiency import ROLE_NAMES_PT
 from bot.features.ratings.ladder import LadderConfig
 from bot.features.riot.history import format_ago
@@ -169,7 +170,9 @@ def board_line(board: str, entry: BoardEntry, ladder: LadderConfig) -> str:
     name = f"**{escape(entry.player.nickname)}**"
     if board == RANK:
         label = ladder.label(entry.tier_key or "", entry.division)
-        return f"{entry.position}. {name} — {label} · {entry.tally.wins}V {entry.tally.losses}D"
+        bar = progress_bar(entry.progress)
+        record = f"{entry.tally.wins}V {entry.tally.losses}D"
+        return f"{entry.position}. {name} — {label} {bar} · {record}"
     if board == WIN_RATE:
         return f"{entry.position}. {name} — {tally_text(entry.tally)}"
     games = entry.kda.games if entry.kda else 0

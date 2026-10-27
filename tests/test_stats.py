@@ -207,7 +207,8 @@ async def test_the_rank_board_lists_placed_players_only_with_tiers_and_no_rating
     embed = build_board_embed(RANK, board, DEFAULT_LADDER)
     text = embed.description or ""
     assert all(e.tier_key and DEFAULT_LADDER.display_name(e.tier_key) in text for e in board)
-    assert "▰" not in text and "mu" not in text.lower().split()
+    assert "▰" in text or "▱" in text  # every row has its progress bar
+    assert "mu" not in text.lower().split()
 
 
 async def test_win_rate_and_kda_boards_need_five_games(stack, service, db):
@@ -361,3 +362,26 @@ async def test_leaderboard_picks_the_board_from_the_choice(stack, cog):
 def test_a_single_game_is_not_pluralised():
     assert tally_text(Tally(1, 0)) == "1V 0D (100% · 1 jogo)"
     assert kda_summary(Kda(1, 5, 1, 5), 3).endswith("em 1 jogo")
+
+
+async def test_the_rank_board_orders_a_division_by_progress_and_shows_the_bars(stack, service):
+    for _ in range(5):
+        await play(stack)
+    ratings = stack.ratings
+    for player, mu in ((1, 27.2), (2, 27.8), (3, 28.2), (4, 33.0)):
+        pid = (await stack.players.require(player)).id
+        await ratings.adjust(pid, mu, None, ADMIN, "test")
+    board = await service.leaderboard(GUILD, RANK)
+    order = [e.player.nickname for e in board]
+    # KD esports first; then No Box II (28.2); then No Box III by progress: 27.8 before 27.2
+    assert order.index("Player 04") < order.index("Player 03")
+    assert order.index("Player 03") < order.index("Player 02") < order.index("Player 01")
+    positions = [e.position for e in board]
+    assert positions == list(range(1, len(board) + 1))  # the bar explains the order: no ties
+    lines = (build_board_embed(RANK, board, DEFAULT_LADDER).description or "").splitlines()
+    line = {name: next(x for x in lines if f"**{name}**" in x) for name in
+            ("Player 04", "Player 03", "Player 02", "Player 01")}  # fmt: skip
+    assert "▰" * 10 in line["Player 04"]  # the top step is a full bar
+    assert "No Box II ▰▰▱▱▱▱▱▱▱▱" in line["Player 03"]
+    assert "No Box III ▰▰▰▰▰▰▰▰▱▱" in line["Player 02"]
+    assert "No Box III ▰▰▱▱▱▱▱▱▱▱" in line["Player 01"]

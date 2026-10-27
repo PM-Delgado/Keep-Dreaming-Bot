@@ -42,3 +42,7 @@ aws_connect.bat
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Real roster (Discord ids and Riot names)
+data/roster.json
+roster.local.json

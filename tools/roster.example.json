@@ -1,0 +1,321 @@
+{
+  "_help": [
+    "Copy this file to data/roster.json (git-ignored) and fill in the 18 entries.",
+    "discord_id: the member's Discord user id (Developer Mode > right click > Copy User ID).",
+    "nickname: 2-24 characters, unique; this is what /register would have stored.",
+    "rank: League Solo/Duo rank the player says they have. tier is IRON..DIAMOND (with division",
+    "  IV, III, II or I) or MASTER, GRANDMASTER, CHALLENGER (division null). Use null for unranked.",
+    "roles: role -> proficiency 1-5. Roles are TOP, JUNGLE, MID, ADC, SUPPORT. Leave out the rest.",
+    "riot: Riot IDs (Name#TAG) to link through the real /riot link process; the first is the main.",
+    "  Use [] for none. platform is the Riot platform of those accounts (euw1, eun1, ...).",
+    "strength: only for simulations. null derives it from the rank; or a number 0-100 to tweak."
+  ],
+  "players": [
+    {
+      "discord_id": 0,
+      "nickname": "Jogador01",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome01#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador02",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome02#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador03",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome03#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador04",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome04#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador05",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome05#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador06",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome06#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador07",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome07#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador08",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome08#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador09",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome09#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador10",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome10#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador11",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome11#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador12",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome12#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador13",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome13#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador14",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome14#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador15",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome15#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador16",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome16#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador17",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome17#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    },
+    {
+      "discord_id": 0,
+      "nickname": "Jogador18",
+      "rank": {
+        "tier": "SILVER",
+        "division": "II"
+      },
+      "roles": {
+        "MID": 5,
+        "ADC": 3
+      },
+      "riot": [
+        "Nome18#EUW"
+      ],
+      "platform": "euw1",
+      "strength": null
+    }
+  ]
+}

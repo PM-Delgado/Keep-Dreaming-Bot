@@ -49,7 +49,8 @@ def in_house_rank_text(profile: Profile, ladder: LadderConfig) -> str:
     if not standing.placed:
         return f"Sem rank (colocação {standing.games}/{ladder.placement_games})"
     label = ladder.label(standing.tier_key or "", standing.division)
-    bar = progress_bar(standing.progress)
+    # The top step has nothing to climb to: it shows a full bar instead of none.
+    bar = progress_bar(1.0 if standing.progress is None else standing.progress)
     return f"{label} {bar}".strip()
 
 

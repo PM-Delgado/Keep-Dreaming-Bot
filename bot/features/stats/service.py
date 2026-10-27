@@ -16,7 +16,7 @@ from datetime import datetime
 from bot.features.matches.repository import PENDING, ROLE_ORDER, VALIDATED
 from bot.features.players.repository import Player
 from bot.features.players.service import PlayerService
-from bot.features.ratings.ladder import step_rank
+from bot.features.ratings.ladder import step_progress, step_rank
 from bot.features.ratings.service import RatingService
 from bot.features.stats.repository import GameRow, StatsRepository
 
@@ -108,6 +108,7 @@ class BoardEntry:
     kda: Kda | None = None
     tier_key: str | None = None
     division: int | None = None
+    progress: float | None = None  # rank board: 0..1 inside the step (1.0 on the top step)
 
 
 def _has_stats(row: GameRow) -> bool:
@@ -240,14 +241,17 @@ class StatsService:
                 if player is None or not stored.placed:
                     continue
                 step = step_rank(ladder, stored.tier_key, stored.division)
+                progress = step_progress(ladder, stored.tier_key, stored.division, stored.mu)
                 entry = BoardEntry(
                     0,
                     player,
                     tally_of(by_player.get(player.id, ())),
                     tier_key=stored.tier_key,
                     division=stored.division,
+                    progress=1.0 if step is not None and progress is None else progress,
                 )
-                scored.append((-1.0 if step is None else float(step), entry))
+                # Step first, then the rating inside it (never shown: the bar is its picture).
+                scored.append((-1000.0 if step is None else step * 1000.0 + stored.mu, entry))
             return _with_positions(scored)
         for pid, player in eligible.items():
             rows = by_player[pid]
