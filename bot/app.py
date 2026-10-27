@@ -16,7 +16,8 @@ EXTENSIONS = (
     "bot.features.admin.cog",
     "bot.features.players.cog",
     "bot.features.riot.cog",  # optional; must load after players (plugs into its services)
-    "bot.features.lobby.cog",  # must load after players
+    "bot.features.champions.cog",  # champion list for /match stats; must load before lobby
+    "bot.features.lobby.cog",  # must load after players and champions
 )
 
 

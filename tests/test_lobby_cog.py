@@ -801,6 +801,159 @@ async def test_mock_report_needs_a_started_game(env):
     assert "Não" in ix.sent[0]["content"]
 
 
+# --- /match stats, set, validate, pending ----
+
+
+async def confirmed_game_with_admin(env) -> tuple[int, dict[str, list[int]]]:
+    """A confirmed game (admin report) with the bundled champion list loaded; returns the sides."""
+    await env.stack.champions.start()
+    lobby_id, sides = await started_game(env)
+    await env.stack.register(1, start=ADMIN)
+    await env.stack.lobbies.report_result(lobby_id, ADMIN, "blue")
+    match = await env.stack.match_repo.get_by_lobby(lobby_id)
+    assert match is not None
+    return match.id, sides
+
+
+async def test_the_result_summary_points_players_to_match_stats(env):
+    lobby_id, sides = await started_game(env)
+    await env.stack.register(1, start=ADMIN)
+    update = await env.stack.lobbies.report_result(lobby_id, ADMIN, "blue")
+    match_id = update.snapshot.match.id  # type: ignore[union-attr]
+    summary = result_summary(
+        update.snapshot, update.events, update.changes, {}, env.stack.ratings.ladder
+    )
+    assert summary is not None
+    assert f"/match stats` (jogo #{match_id})" in summary
+
+
+async def test_match_stats_records_pending_stats_and_match_show_marks_them(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    player = sides["blue"][0]
+    ix = FakeInteraction(player)
+    await env.cog.match_stats.callback(env.cog, ix, "kaisa", 8, 2, 11, match_id)  # type: ignore[arg-type]
+    assert ix.sent[0]["ephemeral"] is True
+    assert f"Jogo #{match_id}" in ix.sent[0]["content"] and "Kai'Sa 8/2/11" in ix.sent[0]["content"]
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    text = text_of(ix.sent[0]["embed"])
+    assert "Kai'Sa 8/2/11 ⏳" in text
+    assert "registou stats de" in text
+    await env.stack.matches.validate_stats(ADMIN, match_id)
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    assert "Kai'Sa 8/2/11 ✅" in text_of(ix.sent[0]["embed"])
+
+
+async def test_match_show_puts_the_champion_icon_next_to_the_player_and_the_riot_notice(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    await env.stack.matches.enter_stats(sides["blue"][0], "Kaisa", 8, 2, 11, match_id)
+
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    embed = ix.sent[0]["embed"]
+    assert "Kai'Sa 8/2/11" in text_of(embed) and "<:champ_" not in text_of(embed)
+    assert not embed.footer.text  # no Riot image on screen, no notice needed
+
+    async def upload(name: str, image: bytes) -> int:
+        return 4242
+
+    async def png(url: str) -> bytes:
+        return b"PNG"
+
+    env.stack.champions.get_bytes = png
+    await env.stack.champions.sync_icons({}, upload)
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    embed = ix.sent[0]["embed"]
+    assert " · <:champ_Kaisa:4242> Kai'Sa 8/2/11 ⏳" in text_of(embed)
+    assert "isn't endorsed by Riot Games" in embed.footer.text
+
+    env.stack.champions.icons = False  # the switch hides them again
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    assert "<:champ_" not in text_of(ix.sent[0]["embed"]) and not ix.sent[0]["embed"].footer.text
+
+
+async def test_match_stats_errors_are_private_and_explain_themselves(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    ix = FakeInteraction(sides["blue"][0])
+    await env.cog.match_stats.callback(env.cog, ix, "nobody", 1, 2, 3, match_id)  # type: ignore[arg-type]
+    assert ix.sent[0]["ephemeral"] is True and "Não conheço" in ix.sent[0]["content"]
+    ix = FakeInteraction(404)
+    await env.cog.match_stats.callback(env.cog, ix, "Ahri", 1, 2, 3, match_id)  # type: ignore[arg-type]
+    assert "não está registado" in ix.sent[0]["content"]
+
+
+async def test_the_champion_autocomplete_offers_the_matching_champions(env):
+    await env.stack.champions.start()
+    ix = FakeInteraction(1)
+    choices = await env.cog._champion_autocomplete(ix, "kai")
+    assert ("Kai'Sa", "Kaisa") in [(c.name, c.value) for c in choices]
+    assert len(await env.cog._champion_autocomplete(ix, "")) == 25
+
+
+async def test_match_set_validate_and_pending_are_for_admins_and_private(env):
+    match_id, sides = await confirmed_game_with_admin(env)
+    blue, red = sides["blue"][0], sides["red"][0]
+    await env.stack.matches.enter_stats(blue, "Ahri", 1, 2, 3, match_id)
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_pending.callback(env.cog, ix)  # type: ignore[arg-type]
+    pending = text_of(ix.sent[0]["embed"])
+    assert ix.sent[0]["ephemeral"] is True
+    assert f"#{match_id}" in pending
+    assert "Ahri 1/2/3" in pending
+    member = SimpleNamespace(id=red, display_name="Red One")
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_set.callback(
+        env.cog,
+        ix,
+        match_id,
+        member,
+        "Zed",
+        5,
+        6,
+        7,
+        SimpleNamespace(value="MID"),  # type: ignore[arg-type]
+    )
+    assert "Zed 5/6/7 (Mid)" in ix.sent[0]["content"] and "Red One" in ix.sent[0]["content"]
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_validate.callback(env.cog, ix, match_id, None)  # type: ignore[arg-type]
+    assert "1 stats validadas" in ix.sent[0]["content"]
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_pending.callback(env.cog, ix)  # type: ignore[arg-type]
+    assert "Não há stats por validar" in text_of(ix.sent[0]["embed"])
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_validate.callback(env.cog, ix, match_id, None)  # type: ignore[arg-type]
+    assert "Não há stats por validar" in ix.sent[0]["content"]
+    ix = FakeInteraction(blue)  # a plain player is refused by the service even if the check slipped
+    await env.cog.match_pending.callback(env.cog, ix)  # type: ignore[arg-type]
+    assert "admin" in ix.sent[0]["content"]
+
+
+async def test_mock_players_can_enter_and_validate_stats_for_a_test_game(env):
+    await env.stack.champions.start()
+    lobby_id, _ = await open_as(env)
+    await env.mock.fill(lobby_id, 9, ADMIN)
+    await env.mock.ready_all(lobby_id)
+    await env.stack.lobbies.ready(lobby_id, 1)
+    await env.stack.lobbies.confirm(lobby_id, 1)
+    await env.mock.report(lobby_id, "blue")
+    await env.mock.confirm(lobby_id)
+    await env.stack.register(1, start=ADMIN)
+    ix = FakeInteraction(ADMIN)
+    await env.cog.mock_stats.callback(env.cog, ix, None, False)  # type: ignore[arg-type]
+    assert "9 jogadores de teste com stats (por validar)" in ix.sent[0]["content"]
+    pending = await env.stack.matches.pending_stats(GUILD, ADMIN)
+    assert len(pending) == 9 and all(p.player_id != 1 for p in pending)
+    ix = FakeInteraction(ADMIN)
+    await env.cog.mock_stats.callback(env.cog, ix, None, True)  # type: ignore[arg-type]
+    assert "(validadas)" in ix.sent[0]["content"]
+    assert await env.stack.matches.pending_stats(GUILD, ADMIN) == []
+    assert await env.mock.clear() == 9  # test games, stats included, leave no trace
+    assert await env.stack.match_repo.get_by_lobby(lobby_id) is None
+
+
 # --- extension wiring ----
 
 
@@ -825,7 +978,18 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
             "cancel",
         }
         match_commands: Any = top["match"]
-        assert {c.name for c in match_commands.commands} == {"show", "void", "fix"}
+        assert {c.name for c in match_commands.commands} == {
+            "show",
+            "void",
+            "fix",
+            "stats",
+            "set",
+            "validate",
+            "pending",
+        }
+        for name in ("void", "fix", "set", "validate", "pending"):  # admin-only
+            command = next(c for c in match_commands.commands if c.name == name)
+            assert any(check.__name__ == "_admin_predicate" for check in command.checks), name
         assert {c.name for c in mock_commands.commands} == {
             "create",
             "fill",
@@ -835,6 +999,7 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
             "clear",
             "report",
             "confirm",
+            "stats",
         }
         for command in mock_commands.commands:  # every mock command is allowlist-gated
             assert any(check.__name__ == "_admin_predicate" for check in command.checks)

@@ -16,17 +16,21 @@ from datetime import UTC, datetime, timedelta
 
 from bot.db import Database
 from bot.features.balance.model import Slot
+from bot.features.champions.service import ChampionService
 from bot.features.lobby.repository import CANCELLED, COMPLETED, LobbyRepository, LobbyRow
 from bot.features.lobby.repository import IN_PROGRESS as LOBBY_IN_PROGRESS
 from bot.features.matches.repository import (
     CONFIRMED,
     IN_PROGRESS,
+    PENDING,
     REPORTED,
+    VALIDATED,
     VOIDED,
     MatchRepository,
     MatchRow,
     ParticipantRow,
 )
+from bot.features.players.proficiency import ROLE_NAMES_PT, ROLES
 from bot.features.players.service import PlayerError, PlayerService
 from bot.features.ratings.repository import StoredRating
 from bot.features.ratings.service import RatingService
@@ -59,6 +63,36 @@ class MatchChange:
     changes: list[StandingChange] = field(default_factory=list)
 
 
+MAX_STAT = 99  # kills, deaths or assists in one game: above this is a typo
+
+
+@dataclass(frozen=True)
+class StatsResult:
+    """One participant's stats after an entry, a correction or a validation."""
+
+    match_id: int
+    participant: ParticipantRow
+    champion_name: str | None
+
+
+def kda_text(kills: int | None, deaths: int | None, assists: int | None) -> str:
+    return f"{kills}/{deaths}/{assists}"
+
+
+def stats_text(p: ParticipantRow, champion_name: str | None) -> str:
+    """ "Ahri 8/2/11" (plus the role actually played, when an admin recorded one)."""
+    if not p.has_stats:
+        return "sem stats"
+    text = f"{champion_name or p.champion} {kda_text(p.kills, p.deaths, p.assists)}"
+    return f"{text} ({ROLE_NAMES_PT[p.played_role]})" if p.played_role else text
+
+
+def _check_kda(kills: int | None, deaths: int | None, assists: int | None) -> None:
+    for value in (kills, deaths, assists):
+        if value is not None and not 0 <= value <= MAX_STAT:
+            raise PlayerError(f"Abates, mortes e assistências têm de estar entre 0 e {MAX_STAT}.")
+
+
 def _visible(stored: StoredRating | None) -> tuple:
     if stored is None:
         return ()
@@ -76,6 +110,7 @@ class MatchService:
         db: Database,
         params: MatchParams | None = None,
         clock: Callable[[], datetime] = _utcnow,
+        champions: ChampionService | None = None,
     ) -> None:
         self.repo = repo
         self.lobbies = lobbies
@@ -85,6 +120,7 @@ class MatchService:
         self.db = db
         self.params = params or MatchParams()
         self.clock = clock
+        self.champions = champions
 
     # --- creation (called by the lobby, inside its transaction) ----
 
@@ -223,6 +259,181 @@ class MatchService:
             changes = await self._rebuild()
         return MatchChange(await self._require(match_id), ["fixed"], changes)
 
+    # --- champion and KDA (M3b) ----
+    # Only a *confirmed* game takes stats. A player's entry waits for an admin (`pending`); what an
+    # admin enters is validated at once. Editing validated stats sends them back to pending.
+
+    async def enter_stats(
+        self,
+        discord_id: int,
+        champion: str,
+        kills: int,
+        deaths: int,
+        assists: int,
+        match_id: int | None = None,
+    ) -> StatsResult:
+        """A player records (or corrects) their own champion and KDA.
+
+        Without `match_id` it is their latest confirmed game whose stats are not validated yet.
+        """
+        player = await self.players.require(discord_id)
+        found = await self._champion(champion)
+        _check_kda(kills, deaths, assists)
+        if match_id is None:
+            match_id = await self.repo.latest_match_needing_stats(player.id)
+            if match_id is None:
+                raise PlayerError(
+                    "Não tens nenhum jogo confirmado por preencher. Indica o número do jogo."
+                )
+        now = self.clock()
+        async with self.db.transaction():
+            await self._require_confirmed(match_id)
+            mine = await self.repo.participant(match_id, player.id)
+            if mine is None:
+                raise PlayerError("Não jogaste nesse jogo.")
+            if (mine.champion, mine.kills, mine.deaths, mine.assists) == (
+                found.id,
+                kills,
+                deaths,
+                assists,
+            ):
+                raise PlayerError(
+                    "Esses valores já estão validados."
+                    if mine.stats_status == VALIDATED
+                    else "Já registaste esses valores; falta um admin validar."
+                )
+            old = stats_text(mine, await self._champion_name(mine.champion))
+            await self.repo.write_stats(
+                match_id, player.id, found.id, kills, deaths, assists, PENDING, player.id, None
+            )
+            after = await self._participant(match_id, player.id)
+            await self.repo.add_audit(
+                match_id,
+                "stats",
+                discord_id,
+                old if mine.has_stats else None,
+                stats_text(after, found.name),
+                now,
+                player.id,
+            )
+        return StatsResult(match_id, after, found.name)
+
+    async def set_stats(
+        self,
+        discord_id: int,
+        match_id: int,
+        target_discord_id: int,
+        champion: str | None = None,
+        kills: int | None = None,
+        deaths: int | None = None,
+        assists: int | None = None,
+        played_role: str | None = None,
+    ) -> StatsResult:
+        """Admin: set or correct someone's stats (validated at once) and/or the role they played.
+
+        Fields left out keep their value; a player with no stats yet needs all four.
+        """
+        admin = await self.players.require(discord_id)
+        if not self.is_admin(discord_id):
+            raise PlayerError("Só um admin pode definir stats.")
+        target = await self.players.repo.get_by_discord(target_discord_id)
+        if target is None:
+            raise PlayerError("Esse jogador não está registado.")
+        if played_role is not None and played_role not in ROLES:
+            raise PlayerError("Role inválida.")
+        _check_kda(kills, deaths, assists)
+        given = (champion, kills, deaths, assists)
+        if all(v is None for v in given) and played_role is None:
+            raise PlayerError("Diz o que corrigir: campeão, abates, mortes, assistências ou role.")
+        found = await self._champion(champion) if champion is not None else None
+        now = self.clock()
+        async with self.db.transaction():
+            await self._require_confirmed(match_id)
+            before = await self.repo.participant(match_id, target.id)
+            if before is None:
+                raise PlayerError("Esse jogador não jogou esse jogo.")
+            old = stats_text(before, await self._champion_name(before.champion))
+            if any(v is not None for v in given):
+                merged = (
+                    found.id if found else before.champion,
+                    before.kills if kills is None else kills,
+                    before.deaths if deaths is None else deaths,
+                    before.assists if assists is None else assists,
+                )
+                if any(v is None for v in merged):
+                    raise PlayerError(
+                        "Este jogador ainda não tem stats: indica campeão, abates, mortes e "
+                        "assistências."
+                    )
+                champion_id, k, d, a = merged
+                assert champion_id is not None and k is not None  # for the type checker
+                assert d is not None and a is not None
+                await self.repo.write_stats(
+                    match_id, target.id, champion_id, k, d, a, VALIDATED, admin.id, admin.id
+                )
+            if played_role is not None:
+                await self.repo.set_played_role(match_id, target.id, played_role)
+            after = await self._participant(match_id, target.id)
+            name = await self._champion_name(after.champion)
+            await self.repo.add_audit(
+                match_id,
+                "stats_set",
+                discord_id,
+                old if before.has_stats or before.played_role else None,
+                stats_text(after, name),
+                now,
+                target.id,
+            )
+        return StatsResult(match_id, after, name)
+
+    async def validate_stats(
+        self, discord_id: int, match_id: int, target_discord_id: int | None = None
+    ) -> list[StatsResult]:
+        """Admin: approve the pending stats of one player, or of everyone in the game."""
+        admin = await self.players.require(discord_id)
+        if not self.is_admin(discord_id):
+            raise PlayerError("Só um admin pode validar stats.")
+        target_id = None
+        if target_discord_id is not None:
+            target = await self.players.repo.get_by_discord(target_discord_id)
+            if target is None:
+                raise PlayerError("Esse jogador não está registado.")
+            target_id = target.id
+        now = self.clock()
+        results = []
+        async with self.db.transaction():
+            await self._require_confirmed(match_id)
+            for p in await self.repo.participants(match_id):
+                if p.stats_status != PENDING or (
+                    target_id is not None and p.player_id != target_id
+                ):
+                    continue
+                if await self.repo.validate_stats(match_id, p.player_id, admin.id):
+                    name = await self._champion_name(p.champion)
+                    await self.repo.add_audit(
+                        match_id,
+                        "stats_validate",
+                        discord_id,
+                        None,
+                        stats_text(p, name),
+                        now,
+                        p.player_id,
+                    )
+                    results.append(
+                        StatsResult(match_id, await self._participant(match_id, p.player_id), name)
+                    )
+        if not results:
+            raise PlayerError("Não há stats por validar nesse jogo.")
+        return results
+
+    async def pending_stats(
+        self, guild_id: int, discord_id: int, limit: int = 25
+    ) -> list[ParticipantRow]:
+        """Admin: stats waiting for validation, oldest game first."""
+        if not self.is_admin(discord_id):
+            raise PlayerError("Só um admin pode ver as stats por validar.")
+        return await self.repo.pending_stats(guild_id, limit)
+
     # --- time-driven (called by the sweeper through the lobby service) ----
 
     async def process(self, now: datetime | None = None) -> list[MatchChange]:
@@ -260,6 +471,34 @@ class MatchService:
         if match is None:
             raise PlayerError("Esse jogo não existe.")
         return match
+
+    async def _require_confirmed(self, match_id: int) -> MatchRow:
+        match = await self._require(match_id)
+        if match.status != CONFIRMED:
+            raise PlayerError(
+                "Este jogo foi anulado."
+                if match.status == VOIDED
+                else "Só se registam stats depois de o resultado estar confirmado."
+            )
+        return match
+
+    async def _participant(self, match_id: int, player_id: int) -> ParticipantRow:
+        row = await self.repo.participant(match_id, player_id)
+        assert row is not None
+        return row
+
+    async def _champion(self, text: str):
+        if self.champions is None:
+            raise PlayerError("A lista de campeões não está disponível.")
+        found = await self.champions.find(text)
+        if found is None:
+            raise PlayerError(f"Não conheço o campeão «{text[:40]}». Escolhe um da lista.")
+        return found
+
+    async def _champion_name(self, champion_id: str | None) -> str | None:
+        if champion_id is None or self.champions is None:
+            return champion_id
+        return (await self.champions.names([champion_id])).get(champion_id, champion_id)
 
     async def _confirm(
         self,

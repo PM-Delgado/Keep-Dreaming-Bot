@@ -20,6 +20,7 @@ include = ["bot*"]
 
 [tool.setuptools.package-data]
 "bot.features.nameday" = ["seed/*.json"]
+"bot.features.champions" = ["seed/*.json"]
 
 [tool.ruff]
 line-length = 100

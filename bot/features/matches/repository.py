@@ -11,6 +11,7 @@ from bot.features.ratings.replay import MatchIn
 from bot.features.ratings.repository import from_db, to_db
 
 IN_PROGRESS, REPORTED, CONFIRMED, VOIDED = "in_progress", "reported", "confirmed", "voided"
+NO_STATS, PENDING, VALIDATED = "none", "pending", "validated"
 ROLE_ORDER = ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
 
 
@@ -46,6 +47,19 @@ class ParticipantRow:
     est_mu: float
     est_sigma: float
     rank_mu: float | None
+    # M3b: what the player (or an admin) said about the game. Never inputs to the ratings.
+    champion: str | None = None  # Data Dragon id
+    kills: int | None = None
+    deaths: int | None = None
+    assists: int | None = None
+    stats_status: str = NO_STATS
+    stats_set_by: int | None = None
+    stats_validated_by: int | None = None
+    played_role: str | None = None  # set when it differs from the role the balancer assigned
+
+    @property
+    def has_stats(self) -> bool:
+        return self.champion is not None
 
 
 @dataclass(frozen=True)
@@ -56,12 +70,18 @@ class AuditRow:
     old_value: str | None
     new_value: str | None
     created_at: datetime
+    subject_id: int | None = None  # the player a stats action is about
 
 
 _COLUMNS = (
     "id, lobby_id, guild_id, status, winner, expected_blue_win, created_at, reported_by,"
     " reported_at, confirmed_by, confirmed_at, auto_confirmed, contested, voided_by, voided_at,"
     " void_reason, reminder_sent"
+)
+_PARTICIPANT_COLUMNS = (
+    "match_id, player_id, side, role, h_mu_before, h_sigma_before, est_mu, est_sigma, rank_mu,"
+    " champion, kills, deaths, assists, stats_status, stats_set_by, stats_validated_by,"
+    " played_role"
 )
 # Columns a transition may set, with the conversion applied to the value.
 _SETTABLE = {
@@ -179,12 +199,81 @@ class MatchRepository:
 
     async def participants(self, match_id: int) -> list[ParticipantRow]:
         async with self.db.conn.execute(
-            "SELECT match_id, player_id, side, role, h_mu_before, h_sigma_before, est_mu,"
-            " est_sigma, rank_mu FROM match_participants WHERE match_id = ?",
+            f"SELECT {_PARTICIPANT_COLUMNS} FROM match_participants WHERE match_id = ?",
             (match_id,),
         ) as cur:
             rows = [ParticipantRow(*r) for r in await cur.fetchall()]
         return sorted(rows, key=lambda p: (p.side, ROLE_ORDER.index(p.role)))
+
+    # --- champion and KDA (M3b) ----
+
+    async def participant(self, match_id: int, player_id: int) -> ParticipantRow | None:
+        async with self.db.conn.execute(
+            f"SELECT {_PARTICIPANT_COLUMNS} FROM match_participants"
+            " WHERE match_id = ? AND player_id = ?",
+            (match_id, player_id),
+        ) as cur:
+            row = await cur.fetchone()
+        return ParticipantRow(*row) if row else None
+
+    async def latest_match_needing_stats(self, player_id: int) -> int | None:
+        """The player's latest confirmed game whose stats are not validated yet."""
+        async with self.db.conn.execute(
+            "SELECT m.id FROM match_participants p JOIN matches m ON m.id = p.match_id"
+            " WHERE p.player_id = ? AND m.status = 'confirmed' AND p.stats_status != 'validated'"
+            " ORDER BY m.confirmed_at DESC, m.id DESC LIMIT 1",
+            (player_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def write_stats(
+        self,
+        match_id: int,
+        player_id: int,
+        champion: str,
+        kills: int,
+        deaths: int,
+        assists: int,
+        status: str,
+        set_by: int,
+        validated_by: int | None,
+    ) -> None:
+        await self.db.conn.execute(
+            "UPDATE match_participants SET champion = ?, kills = ?, deaths = ?, assists = ?,"
+            " stats_status = ?, stats_set_by = ?, stats_validated_by = ?"
+            " WHERE match_id = ? AND player_id = ?",
+            (champion, kills, deaths, assists, status, set_by, validated_by, match_id, player_id),
+        )
+        await self.db.conn.commit()
+
+    async def set_played_role(self, match_id: int, player_id: int, role: str | None) -> None:
+        await self.db.conn.execute(
+            "UPDATE match_participants SET played_role = ? WHERE match_id = ? AND player_id = ?",
+            (role, match_id, player_id),
+        )
+        await self.db.conn.commit()
+
+    async def validate_stats(self, match_id: int, player_id: int, validated_by: int) -> bool:
+        """Compare-and-set: True only if the stats were pending."""
+        cur = await self.db.conn.execute(
+            "UPDATE match_participants SET stats_status = 'validated', stats_validated_by = ?"
+            " WHERE match_id = ? AND player_id = ? AND stats_status = 'pending'",
+            (validated_by, match_id, player_id),
+        )
+        await self.db.conn.commit()
+        return cur.rowcount == 1
+
+    async def pending_stats(self, guild_id: int, limit: int) -> list[ParticipantRow]:
+        """Stats waiting for an admin, oldest game first (confirmed games of this server only)."""
+        columns = ", ".join(f"p.{c.strip()}" for c in _PARTICIPANT_COLUMNS.split(","))
+        async with self.db.conn.execute(
+            f"SELECT {columns} FROM match_participants p JOIN matches m ON m.id = p.match_id"
+            " WHERE m.guild_id = ? AND m.status = 'confirmed' AND p.stats_status = 'pending'"
+            " ORDER BY m.id, p.player_id LIMIT ?",
+            (guild_id, limit),
+        ) as cur:
+            return [ParticipantRow(*r) for r in await cur.fetchall()]
 
     async def transition(
         self, match_id: int, from_statuses: Sequence[str], to_status: str, **fields: Any
@@ -229,22 +318,25 @@ class MatchRepository:
         old_value: str | None,
         new_value: str | None,
         now: datetime,
+        subject_id: int | None = None,
     ) -> None:
         await self.db.conn.execute(
-            "INSERT INTO match_audit (match_id, action, actor_id, old_value, new_value, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (match_id, action, actor_id, old_value, new_value, to_db(now)),
+            "INSERT INTO match_audit"
+            " (match_id, action, actor_id, old_value, new_value, created_at, subject_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (match_id, action, actor_id, old_value, new_value, to_db(now), subject_id),
         )
         await self.db.conn.commit()
 
     async def audit(self, match_id: int) -> list[AuditRow]:
         async with self.db.conn.execute(
-            "SELECT match_id, action, actor_id, old_value, new_value, created_at FROM match_audit"
-            " WHERE match_id = ? ORDER BY id",
+            "SELECT match_id, action, actor_id, old_value, new_value, created_at, subject_id"
+            " FROM match_audit WHERE match_id = ? ORDER BY id",
             (match_id,),
         ) as cur:
             return [
-                AuditRow(r[0], r[1], r[2], r[3], r[4], from_db(r[5])) for r in await cur.fetchall()
+                AuditRow(r[0], r[1], r[2], r[3], r[4], from_db(r[5]), r[6])
+                for r in await cur.fetchall()
             ]
 
     async def confirmed_for_replay(self) -> list[MatchIn]:

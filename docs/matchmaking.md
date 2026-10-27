@@ -180,6 +180,13 @@ OPEN -> READY_CHECK -> TEAMS_PROPOSED -> IN_PROGRESS -> COMPLETED
 6. **Corrections**: `/match void` (undoes the effect if it had been confirmed) and `/match fix`
    (flips a confirmed result) replay everything again. Every step is kept in an audit trail
    (`/match show`).
+7. **Champion and KDA** (after step 5 only). Each player records their champion and
+   kills/deaths/assists with `/match stats`; that entry is *pending* until an admin validates it
+   (`/match validate`, `/match pending` lists them). Admin entries (`/match set`) are validated at
+   once and can also record the role a player actually played. Editing validated stats sends them
+   back to pending. Stats are audited like results, never change a result or a rating, and only
+   validated stats are meant for public numbers (M3c). The champion list comes from Data Dragon,
+   cached in the database (with a bundled list for the first start).
 
 Players in a started game cannot join another lobby until its result is in. Signing up to a
 *future* scheduled lobby is always allowed.

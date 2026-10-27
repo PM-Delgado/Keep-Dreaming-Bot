@@ -171,6 +171,43 @@ class MockPlayers:
             raise PlayerError("Não há nenhum jogador de teste na outra equipa.")
         return await self.lobbies.confirm_result(lobby_id, confirmer)
 
+    async def stats(
+        self, match_id: int | None, guild_id: int, admin_id: int, validate: bool = False
+    ) -> tuple[int, int]:
+        """Random champion and KDA for every mock player in a confirmed game, as if they had
+        entered it themselves (pending); with `validate` an admin approves those right away.
+        Returns (game number, how many mock players got stats)."""
+        self._require_enabled()
+        matches = self.lobbies.matches
+        row = await (
+            matches.repo.get(match_id) if match_id else matches.repo.latest_for_guild(guild_id)
+        )
+        if row is None or row.guild_id != guild_id:
+            raise PlayerError("Não encontrei esse jogo.")
+        if matches.champions is None:
+            raise PlayerError("A lista de campeões não está disponível.")
+        champions = await matches.champions.repo.all()
+        mocks = {p.id: p for p in await self.players.repo.list_mock()}
+        entered = 0
+        for participant in await matches.repo.participants(row.id):
+            mock = mocks.get(participant.player_id)
+            if mock is None:
+                continue
+            await matches.enter_stats(
+                mock.discord_id,
+                self.rng.choice(champions).id,
+                self.rng.randint(0, 15),
+                self.rng.randint(0, 12),
+                self.rng.randint(0, 20),
+                row.id,
+            )
+            if validate:
+                await matches.validate_stats(admin_id, row.id, mock.discord_id)
+            entered += 1
+        if entered == 0:
+            raise PlayerError("Não há jogadores de teste neste jogo.")
+        return row.id, entered
+
     async def clear(self) -> int:
         """Delete all mock players. Refused while any of them is in an unfinished lobby.
 

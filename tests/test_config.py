@@ -58,3 +58,10 @@ def test_riot_settings_are_read_and_the_key_is_not_in_the_repr():
 def test_invalid_riot_platform_raises():
     with pytest.raises(ConfigError, match="RIOT_DEFAULT_PLATFORM"):
         load_settings({**VALID, "RIOT_DEFAULT_PLATFORM": "mars1"})
+
+
+def test_champion_icons_are_on_unless_turned_off():
+    assert load_settings(VALID).champion_icons is True
+    assert load_settings({**VALID, "CHAMPION_ICONS": "true"}).champion_icons is True
+    for off in ("false", "0", "no", "off", ""):
+        assert load_settings({**VALID, "CHAMPION_ICONS": off}).champion_icons is False, off

@@ -17,10 +17,11 @@ from bot.features.lobby.repository import (
     TEAMS_PROPOSED,
 )
 from bot.features.lobby.service import EntryView, LobbySnapshot, ProposalView, SlotView
-from bot.features.matches.repository import AuditRow, MatchRow
-from bot.features.matches.service import StandingChange
+from bot.features.matches.repository import AuditRow, MatchRow, ParticipantRow
+from bot.features.matches.service import StandingChange, stats_text
 from bot.features.players.proficiency import ROLE_NAMES_PT
 from bot.features.ratings.ladder import LadderConfig, step_rank
+from bot.features.riot.legal import RIOT_NOTICE
 
 STATUS_TEXT = {
     OPEN: "Aberta",
@@ -264,6 +265,8 @@ def result_summary(
     elif "result_confirmed" in events:
         how = " (confirmado automaticamente)" if match.auto_confirmed else ""
         head = f"🏆 In-house #{lobby_id}: **{winner} ganhou**{how}."
+        hint = f"📝 Regista o teu campeão e KDA com `/match stats` (jogo #{match.id})."
+        return "\n".join([head, *standing_lines(changes, names, ladder), hint])
     else:
         return None
     return "\n".join([head, *standing_lines(changes, names, ladder)])
@@ -282,15 +285,47 @@ AUDIT_TEXT = {
     "contest": "contestou",
     "set_winner": "corrigiu o vencedor",
     "void": "anulou",
+    "stats": "registou stats de",
+    "stats_set": "definiu stats de",
+    "stats_validate": "validou stats de",
 }
+STATS_MARK = {"pending": "⏳", "validated": "✅"}
+
+
+def stats_suffix(p: ParticipantRow, champion_name: str | None, icon: str = "") -> str:
+    """ " · <icon> Ahri 8/2/11 ✅" for a player with stats (⏳ until an admin validates them).
+
+    `icon` is the champion's emoji markup, when its icon is available.
+    """
+    if not p.has_stats:
+        return ""
+    text = discord.utils.escape_markdown(stats_text(p, champion_name))
+    return f" · {icon + ' ' if icon else ''}{text} {STATS_MARK[p.stats_status]}"
+
+
+def build_pending_embed(items: Sequence[tuple[int, str, str]]) -> discord.Embed:
+    """/match pending: (match id, nickname, stats text) waiting for an admin, oldest game first."""
+    lines = [
+        f"**#{match_id}** · {discord.utils.escape_markdown(who)} · {text}"
+        for match_id, who, text in items
+    ]
+    embed = discord.Embed(
+        title="Stats por validar",
+        description="\n".join(lines) or "Não há stats por validar.",
+        color=discord.Color.orange(),
+    )
+    if items:
+        embed.set_footer(text="Valida com /match validate (jogo e, se quiseres, jogador).")
+    return embed
 
 
 def build_match_embed(
     match: MatchRow,
-    teams: Mapping[str, Sequence[tuple[str, str]]],
-    audit: Sequence[tuple[AuditRow, str]],
+    teams: Mapping[str, Sequence[tuple[str, str, str]]],
+    audit: Sequence[tuple[AuditRow, str, str | None]],
+    icons_shown: bool = False,
 ) -> discord.Embed:
-    """/match show: status, winner, who played what, and who did what (no ratings)."""
+    """/match show: status, winner, who played what (role, name, stats suffix), and who did what."""
     embed = discord.Embed(
         title=f"Jogo #{match.id} · {MATCH_STATUS_TEXT[match.status]}",
         color=discord.Color.green() if match.status == "confirmed" else discord.Color.dark_grey(),
@@ -301,18 +336,21 @@ def build_match_embed(
         embed.description = f"Anulado ({match.void_reason or 'sem motivo'})."
     for side in ("blue", "red"):
         lines = [
-            f"**{ROLE_NAMES_PT[role]}** — {discord.utils.escape_markdown(name)}"
-            for role, name in teams.get(side, ())
+            f"**{ROLE_NAMES_PT[role]}** — {discord.utils.escape_markdown(name)}{suffix}"
+            for role, name, suffix in teams.get(side, ())
         ]
         embed.add_field(name=f"{SIDE_EMOJI[side]} {SIDE_NAME[side]}", value="\n".join(lines) or "—")
     if audit:
         history = [
             f"<t:{int(row.created_at.timestamp())}:f> · {discord.utils.escape_markdown(who)} "
             f"{AUDIT_TEXT.get(row.action, row.action)}"
+            + (f" {discord.utils.escape_markdown(subject)}" if subject else "")
             + (f": {row.new_value}" if row.action == "void" and row.new_value else "")
-            for row, who in audit[-10:]
+            for row, who, subject in audit[-10:]
         ]
         embed.add_field(name="Histórico", value="\n".join(history), inline=False)
+    if icons_shown:  # Riot asks for this wherever its images appear
+        embed.set_footer(text=RIOT_NOTICE)
     return embed
 
 

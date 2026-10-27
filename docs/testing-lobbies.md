@@ -64,6 +64,7 @@ and are marked with 🤖 in lobby messages. You must be registered yourself: `/r
 | Lost message | `/lobby show` | The lobby is re-posted and the old copy removed |
 | Result flow | After **Confirmar** (teams): `/mock report winner:Azul`, then press **Confirmar resultado** or **Contestar** | With only your account (an admin) the confirm is final at once; use `/mock confirm` to confirm as a mock on the other team |
 | Auto-confirm | `/mock report`, then wait 30 minutes | Confirmed automatically, with a summary in the channel; **Contestar** stops it |
+| Champion and KDA | After a confirmed game: `/match stats champion:<type to search> kills deaths assists`, then `/match show`, `/match pending`, `/match validate match:<n>` | Autocomplete lists champions; the game shows `· Ahri 8/2/11 ⏳` until validated, then `✅`. `/mock stats match:<n> validate:True` fills the mocks' stats |
 | Placement | Finish games with the same players | *Colocação n/5* in the summary; the tiers appear after the 5th confirmed game |
 | Correction | `/match fix match:<n> winner:...` or `/match void match:<n>` | The message and ratings follow; `/match show` has the history |
 | Scheduled lobby | `/lobby schedule when:<a few minutes ahead> note:teste`, then `/mock fill lobby:<n>` | Message titled "Agendada" with the time; ten sign-ups wait; at the time the ready-check starts |
