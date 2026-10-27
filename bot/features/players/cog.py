@@ -24,19 +24,14 @@ from bot.features.players.service import PlayerError, PlayerService, Profile
 from bot.features.ratings.ladder import LadderConfig
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingError, RatingService
+from bot.features.riot.legal import RIOT_NOTICE
 
 if TYPE_CHECKING:
     from bot.app import KDBot
 
 log = logging.getLogger(__name__)
 
-FOOTER = (
-    "Rank interno do grupo: não equivale a um rank do League of Legends.\n"
-    "Keep-Dreaming-Bot isn't endorsed by Riot Games and doesn't reflect the views or opinions of "
-    "Riot Games or anyone officially involved in producing or managing Riot Games properties. "
-    "Riot Games, and all associated properties are trademarks or registered trademarks of "
-    "Riot Games, Inc."
-)
+FOOTER = f"Rank interno do grupo: não equivale a um rank do League of Legends.\n{RIOT_NOTICE}"
 SOURCE_PT = {"admin": "definido por admin", "declared": "declarado", "estimated": "estimado"}
 
 

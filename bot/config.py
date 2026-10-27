@@ -28,6 +28,9 @@ class Settings:
     # keep them off in production.
     mock_players: bool = False
     ready_check_seconds: int = 120
+    # Champion icons (Riot Data Dragon images) shown as application emojis next to players' stats.
+    # On by default; turn off to stop uploading and showing them (docs/riot-policy.md).
+    champion_icons: bool = True
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -69,6 +72,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         mock_players=env.get("ENABLE_MOCK_PLAYERS", "").strip().lower()
         in ("1", "true", "yes", "on"),
         ready_check_seconds=_parse_ready_seconds(env.get("READY_CHECK_SECONDS", "")),
+        champion_icons=_truthy(env.get("CHAMPION_ICONS", "true")),
     )
 
 

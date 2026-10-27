@@ -98,6 +98,10 @@ need your Discord user ID in `ADMIN_USER_IDS`.
 | `/match show [match]` | A game's status, teams and history. |
 | `/match void <match> [reason]` | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
 | `/match fix <match> <winner>` | *Admin.* Correct a confirmed result or decide a pending or contested one. |
+| `/match stats <champion> <kills> <deaths> <assists> [match]` | Record your own champion and KDA for a confirmed game (default: your latest game without validated stats). Waits for an admin to validate it. |
+| `/match set <match> <member> [champion] [kills] [deaths] [assists] [role]` | *Admin.* Set or correct someone's stats (validated at once) or the role they actually played. |
+| `/match validate <match> [member]` | *Admin.* Validate the pending stats of a game (of one player, or of everybody). |
+| `/match pending` | *Admin.* List the stats waiting for validation. |
 
 The lobby message carries the buttons: **Entrar**, **Sair**, **Pronto**, **Recusar**, **Confirmar**
 (teams), **Azul ganhou** / **Vermelho ganhou**, **Confirmar resultado**, **Contestar** and
@@ -134,6 +138,7 @@ The lobby message carries the buttons: **Entrar**, **Sair**, **Pronto**, **Recus
 | `/mock fill [count] [lobby]` | Put fake players into a lobby. |
 | `/mock ready [lobby]`, `/mock drop [lobby]` | Make the fake players confirm the ready-check, or leave. |
 | `/mock report <winner>`, `/mock confirm` | A fake player reports or confirms a result. |
+| `/mock stats [match] [validate]` | The fake players of a confirmed game enter random champion and KDA (optionally validated). |
 | `/mock list`, `/mock clear` | List the fake players; delete them and the test games they played. |
 
 ### Name of the day
@@ -190,6 +195,7 @@ Read once at startup from the environment or `.env` (`bot/config.py`).
 | `RIOT_API_KEY` | no | | Enables the `/riot` commands. Without it ranks and roles are set manually. |
 | `RIOT_DEFAULT_PLATFORM` | no | `euw1` | Platform used when `/riot link` does not specify one. |
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
+| `CHAMPION_ICONS` | no | on | Show champion icons (Riot Data Dragon images, uploaded once as bot emojis) next to players' stats. `false` turns them off; see `docs/riot-policy.md`. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
 
 **Data.** Everything is in one SQLite file (plus `-wal` and `-shm` files while the bot runs). Back it
@@ -216,6 +222,7 @@ bot/
     admin/         /sync
     players/       roster, role proficiency, profile, admin rating and role commands
     riot/          optional Riot API client, role experience, /riot commands
+    champions/     champion list from Data Dragon (cached, with a bundled seed) for /match stats
     ratings/       pure rating core: rank estimate, matchmaking estimate, ladder, OpenSkill, replay
     balance/       pure team balancer
     lobby/         lobby state machine, messages, buttons, /lobby /match /mock commands

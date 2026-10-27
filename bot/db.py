@@ -255,6 +255,55 @@ MIGRATIONS: list[str] = [
         created_at TEXT NOT NULL
     );
     """,
+    # 9: champion and KDA per player per game (M3b). Players enter their own stats (`pending`); an
+    # admin validates them (`validated`, also what an admin-entered row is). `champion` is a Data
+    # Dragon id with no foreign key, so a champion dropped from a later patch never breaks history.
+    # `match_audit` is recreated because SQLite cannot alter a CHECK: it gains the stats actions and
+    # `subject_id`, the player whose stats the action is about (NULL for match-level actions).
+    """
+    CREATE TABLE champions (
+        id    TEXT PRIMARY KEY,
+        name  TEXT NOT NULL,
+        patch TEXT NOT NULL
+    );
+    ALTER TABLE match_participants ADD COLUMN champion TEXT;
+    ALTER TABLE match_participants ADD COLUMN kills   INTEGER CHECK (kills   BETWEEN 0 AND 99);
+    ALTER TABLE match_participants ADD COLUMN deaths  INTEGER CHECK (deaths  BETWEEN 0 AND 99);
+    ALTER TABLE match_participants ADD COLUMN assists INTEGER CHECK (assists BETWEEN 0 AND 99);
+    ALTER TABLE match_participants ADD COLUMN stats_status TEXT NOT NULL DEFAULT 'none'
+        CHECK (stats_status IN ('none', 'pending', 'validated'));
+    ALTER TABLE match_participants ADD COLUMN stats_set_by INTEGER REFERENCES players(id);
+    ALTER TABLE match_participants ADD COLUMN stats_validated_by INTEGER REFERENCES players(id);
+    ALTER TABLE match_participants ADD COLUMN played_role TEXT
+        CHECK (played_role IN ('TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'));
+    CREATE TABLE match_audit_new (
+        id         INTEGER PRIMARY KEY,
+        match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+        action     TEXT NOT NULL CHECK (action IN
+                   ('report', 'confirm', 'auto_confirm', 'contest', 'set_winner', 'void',
+                    'stats', 'stats_set', 'stats_validate')),
+        actor_id   INTEGER,  -- Discord user ID; NULL for the bot itself
+        old_value  TEXT,
+        new_value  TEXT,
+        created_at TEXT NOT NULL,
+        subject_id INTEGER REFERENCES players(id)
+    );
+    INSERT INTO match_audit_new (id, match_id, action, actor_id, old_value, new_value, created_at)
+        SELECT id, match_id, action, actor_id, old_value, new_value, created_at FROM match_audit;
+    DROP TABLE match_audit;
+    ALTER TABLE match_audit_new RENAME TO match_audit;
+    CREATE INDEX match_participants_pending ON match_participants(stats_status)
+        WHERE stats_status = 'pending';
+    """,
+    # 10: which champion icons are already uploaded as application emojis. Apart from `champions`,
+    # which is replaced on every new patch; a champion id keeps its emoji across patches.
+    """
+    CREATE TABLE champion_emojis (
+        champion_id TEXT PRIMARY KEY,
+        emoji_id    INTEGER NOT NULL,
+        emoji_name  TEXT NOT NULL
+    );
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

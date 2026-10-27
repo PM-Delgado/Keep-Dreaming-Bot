@@ -12,18 +12,20 @@ from bot.features.lobby.render import (
     build_list_embed,
     build_lobby_embed,
     build_match_embed,
+    build_pending_embed,
     ready_check_ping,
     report_ping,
     result_reminder_ping,
     result_summary,
     scheduled_ping,
+    stats_suffix,
 )
 from bot.features.lobby.repository import ACTIVE, LobbyRepository, LobbyRow
 from bot.features.lobby.schedule import EXAMPLES
 from bot.features.lobby.service import LobbyParams, LobbyService, LobbySnapshot, LobbyUpdate
 from bot.features.lobby.views import LobbyView, state_of
 from bot.features.matches.repository import MatchRepository
-from bot.features.matches.service import MatchParams, MatchService
+from bot.features.matches.service import MAX_STAT, MatchParams, MatchService, stats_text
 from bot.features.players.choices import ROLE_CHOICES
 from bot.features.players.service import PlayerError
 from bot.permissions import admin_only, is_admin
@@ -309,10 +311,18 @@ class Lobby(commands.Cog):
             return
         people = await repo.participants(row.id)
         names = await self.service.players.repo.get_many([p.player_id for p in people])
-        teams: dict[str, list[tuple[str, str]]] = {"blue": [], "red": []}
+        champion_ids = [p.champion for p in people if p.champion]
+        champions = await self._champion_names(champion_ids)
+        icons = await self._champion_icons(champion_ids)
+        teams: dict[str, list[tuple[str, str, str]]] = {"blue": [], "red": []}
         for p in people:
+            champion = p.champion or ""
             teams[p.side].append(
-                (p.role, names[p.player_id].nickname if p.player_id in names else "?")
+                (
+                    p.role,
+                    names[p.player_id].nickname if p.player_id in names else "?",
+                    stats_suffix(p, champions.get(champion), icons.get(champion, "")),
+                )
             )
         audit = []
         for entry in await repo.audit(row.id):
@@ -321,9 +331,17 @@ class Lobby(commands.Cog):
                 if entry.actor_id is not None
                 else None
             )
-            audit.append((entry, actor.nickname if actor else "Bot"))
+            subject = (
+                (await self.service.players.repo.get_many([entry.subject_id])).get(entry.subject_id)
+                if entry.subject_id is not None
+                else None
+            )
+            audit.append(
+                (entry, actor.nickname if actor else "Bot", subject.nickname if subject else None)
+            )
         await interaction.response.send_message(
-            embed=build_match_embed(row, teams, audit), allowed_mentions=NO_MENTIONS
+            embed=build_match_embed(row, teams, audit, icons_shown=bool(icons)),
+            allowed_mentions=NO_MENTIONS,
         )
 
     @match_group.command(name="void", description="Anula um jogo, sem efeito nos ratings (admin).")
@@ -345,6 +363,148 @@ class Lobby(commands.Cog):
     ) -> None:
         await self._match_command(
             interaction, lambda: self.service.fix_match(match, interaction.user.id, winner.value)
+        )
+
+    # --- /match stats: champion and KDA ----
+
+    async def _champion_names(self, ids: list[str]) -> dict[str, str]:
+        champions = self.service.matches.champions
+        return await champions.names(ids) if champions is not None and ids else {}
+
+    async def _champion_icons(self, ids: list[str]) -> dict[str, str]:
+        champions = self.service.matches.champions
+        return await champions.icon_markup(ids) if champions is not None and ids else {}
+
+    async def _stats_command(self, interaction: discord.Interaction, action) -> None:
+        """Run a stats action; `action` returns the reply text. Replies are private."""
+        try:
+            text = await action()
+        except PlayerError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        await interaction.response.send_message(text, ephemeral=True, allowed_mentions=NO_MENTIONS)
+
+    @match_group.command(name="stats", description="Regista o teu campeão e KDA de um jogo.")
+    @app_commands.describe(
+        champion="O campeão que jogaste.",
+        kills="Abates.",
+        deaths="Mortes.",
+        assists="Assistências.",
+        match="O número do jogo (por defeito, o teu último por validar).",
+    )
+    async def match_stats(
+        self,
+        interaction: discord.Interaction,
+        champion: str,
+        kills: app_commands.Range[int, 0, MAX_STAT],
+        deaths: app_commands.Range[int, 0, MAX_STAT],
+        assists: app_commands.Range[int, 0, MAX_STAT],
+        match: int | None = None,
+    ) -> None:
+        async def action() -> str:
+            result = await self.service.matches.enter_stats(
+                interaction.user.id, champion, kills, deaths, assists, match
+            )
+            text = stats_text(result.participant, result.champion_name)
+            return f"Jogo #{result.match_id}: **{text}** registado. Falta um admin validar."
+
+        await self._stats_command(interaction, action)
+
+    @match_group.command(name="set", description="Define as stats de um jogador num jogo (admin).")
+    @app_commands.describe(
+        match="O número do jogo.",
+        member="O jogador.",
+        champion="O campeão (o que deixares em branco mantém-se).",
+        kills="Abates.",
+        deaths="Mortes.",
+        assists="Assistências.",
+        role="A role que jogou de facto, se for diferente da atribuída.",
+    )
+    @app_commands.choices(role=ROLE_CHOICES)
+    @admin_only
+    async def match_set(
+        self,
+        interaction: discord.Interaction,
+        match: int,
+        member: discord.Member,
+        champion: str | None = None,
+        kills: app_commands.Range[int, 0, MAX_STAT] | None = None,
+        deaths: app_commands.Range[int, 0, MAX_STAT] | None = None,
+        assists: app_commands.Range[int, 0, MAX_STAT] | None = None,
+        role: app_commands.Choice[str] | None = None,
+    ) -> None:
+        async def action() -> str:
+            result = await self.service.matches.set_stats(
+                interaction.user.id,
+                match,
+                member.id,
+                champion,
+                kills,
+                deaths,
+                assists,
+                role.value if role else None,
+            )
+            return (
+                f"Jogo #{match}: **{stats_text(result.participant, result.champion_name)}** de "
+                f"{discord.utils.escape_markdown(member.display_name)} guardado."
+            )
+
+        await self._stats_command(interaction, action)
+
+    @match_stats.autocomplete("champion")
+    @match_set.autocomplete("champion")
+    async def _champion_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        champions = self.service.matches.champions
+        if champions is None:
+            return []
+        suggestions = await champions.suggest(current)
+        return [app_commands.Choice(name=c.name, value=c.id) for c in suggestions]
+
+    @match_group.command(
+        name="validate", description="Valida as stats por validar de um jogo (admin)."
+    )
+    @app_commands.describe(
+        match="O número do jogo.", member="Só este jogador (por defeito, todos os do jogo)."
+    )
+    @admin_only
+    async def match_validate(
+        self, interaction: discord.Interaction, match: int, member: discord.Member | None = None
+    ) -> None:
+        async def action() -> str:
+            results = await self.service.matches.validate_stats(
+                interaction.user.id, match, member.id if member else None
+            )
+            return f"Jogo #{match}: {len(results)} stats validadas."
+
+        await self._stats_command(interaction, action)
+
+    @match_group.command(name="pending", description="Lista as stats por validar (admin).")
+    @admin_only
+    async def match_pending(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
+            return
+        try:
+            rows = await self.service.matches.pending_stats(
+                interaction.guild_id, interaction.user.id
+            )
+        except PlayerError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        people = await self.service.players.repo.get_many([p.player_id for p in rows])
+        champions = await self._champion_names([p.champion for p in rows if p.champion])
+        items = [
+            (
+                p.match_id,
+                people[p.player_id].nickname if p.player_id in people else "?",
+                stats_text(p, champions.get(p.champion or "")),
+            )
+            for p in rows
+        ]
+        await interaction.response.send_message(
+            embed=build_pending_embed(items), ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
     async def _match_command(self, interaction: discord.Interaction, action) -> None:
@@ -479,6 +639,32 @@ class Lobby(commands.Cog):
         await self.refresh_message(update.snapshot)
         await self.notify(update)
 
+    @mock_group.command(
+        name="stats", description="Os jogadores de teste registam campeão e KDA de um jogo."
+    )
+    @app_commands.describe(
+        match="O número do jogo (por defeito, o mais recente).",
+        validate="Validar também as stats (como admin).",
+    )
+    @admin_only
+    async def mock_stats(
+        self, interaction: discord.Interaction, match: int | None = None, validate: bool = False
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
+            return
+        try:
+            match_id, count = await self.mock.stats(
+                match, interaction.guild_id, interaction.user.id, validate
+            )
+        except PlayerError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        state = "validadas" if validate else "por validar"
+        await interaction.response.send_message(
+            f"Jogo #{match_id}: {count} jogadores de teste com stats ({state}).", ephemeral=True
+        )
+
     @mock_group.command(name="list", description="Lista os jogadores de teste.")
     @admin_only
     async def mock_list(self, interaction: discord.Interaction) -> None:
@@ -508,6 +694,11 @@ async def setup(bot: "KDBot") -> None:
     players_cog = bot.get_cog("Players")
     if players_cog is None:
         raise RuntimeError("bot.features.players.cog must be loaded before bot.features.lobby.cog")
+    champions_cog = bot.get_cog("Champions")
+    if champions_cog is None:
+        raise RuntimeError(
+            "bot.features.champions.cog must be loaded before bot.features.lobby.cog"
+        )
     settings = bot.settings
     admin = lambda user_id: is_admin(settings, user_id)  # noqa: E731
     lobbies = LobbyRepository(bot.db)
@@ -522,6 +713,7 @@ async def setup(bot: "KDBot") -> None:
         admin,
         bot.db,
         MatchParams(),
+        champions=champions_cog.service,  # type: ignore[attr-defined]
     )
     service = LobbyService(
         lobbies,

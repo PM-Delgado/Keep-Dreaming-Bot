@@ -4,6 +4,8 @@ import random
 from datetime import UTC, datetime, timedelta
 
 from bot.db import Database
+from bot.features.champions.repository import ChampionRepository
+from bot.features.champions.service import ChampionService
 from bot.features.lobby.repository import LobbyRepository
 from bot.features.lobby.service import LobbyParams, LobbyService, LobbyUpdate
 from bot.features.matches.repository import MatchRepository
@@ -42,6 +44,7 @@ class LobbyStack:
         self.match_repo = MatchRepository(db)
         self.ratings.matches_source = self.match_repo.confirmed_for_replay
         self.ratings.form_source = self.match_repo.recent_results
+        self.champions = ChampionService(ChampionRepository(db))  # call `.start()` to seed it
         self.matches = MatchService(
             self.match_repo,
             self.repo,
@@ -50,6 +53,7 @@ class LobbyStack:
             lambda user_id: user_id == ADMIN,
             db,
             clock=self.clock,
+            champions=self.champions,
         )
         self.lobbies = self.make_service(seed)
 
