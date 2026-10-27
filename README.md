@@ -18,6 +18,7 @@ rank that moves as games are played.
 - [How it works](#how-it-works)
 - [Commands](#commands)
 - [Testing the commands](#testing-the-commands)
+- [The group's roster](#the-groups-roster)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
 - [Development](#development)
@@ -95,7 +96,7 @@ every error message is private). Commands marked *admin* need your Discord user 
 | `/profile rank <tier> [division]` | private | Report your League Solo/Duo rank; it seeds your starting rating while you have few games. |
 | `/history [user]` | public | The last 10 confirmed games: result, side, role, champion and KDA (validated stats only; pending ones show "stats por validar"). The header has the overall record. |
 | `/stats [user]` | public | Overall record, win rate and KDA; per role; top 5 champions and champion x role (validated stats only). Every figure shows its number of games. |
-| `/leaderboard [board]` | public | `board` is *Rank do grupo* (default: players past placement, by tier and division, ties share a position), *Taxa de vitórias* or *KDA* (both need 5 games; KDA counts validated games). Ratings are never shown. |
+| `/leaderboard [board]` | public | `board` is *Rank do grupo* (default: players past placement, by tier and division with a progress bar toward the next division; inside a division the fuller bar ranks higher; KD esports, the top step, shows a full bar), *Taxa de vitórias* or *KDA* (both need 5 games; KDA counts validated games; equal scores share a position, A-Z). Ratings are never shown as numbers. |
 
 ### Lobbies and games
 
@@ -173,32 +174,28 @@ A daily task also makes the pick at 00:00 Europe/Lisbon.
 
 ## Testing the commands
 
-Two ways to get data to test with. Both leave your real database alone.
+Two ways to get data to test with.
 
-**1. A demo database (every embed with realistic data).** Build it once, then start the bot on it:
+**1. The real roster with test games (every embed with the real group).** Seed the roster and play
+the games, then start the bot on that database (see [The group's roster](#the-groups-roster)):
 
 ```bash
-python tools/seed_demo.py --owner-id <your user id> --bot-id <the bot's user id> [--guild-id <id>] [--force]
+python -m bot.features.roster seed
+python -m bot.features.roster games
+python -m bot
 ```
 
-```powershell
-$env:DB_PATH = "data/demo.sqlite3"; python -m bot        # PowerShell
-```
+You get the 18 real players with their ranks, roles and Riot accounts, and games in every state:
+confirmed by players, by an admin and automatically, corrected, voided before and after the result,
+contested, reported and in progress. Stats are validated, pending or missing; one of your games has a
+played role that differs from the assigned one; two players are still in placement. The reported game
+is auto-confirmed about 20 minutes after it is played, so look at it first. A database cannot hold the
+*lobby message* of an open or scheduled lobby: use `/lobby open`, `/lobby schedule` and `/mock` for
+those. Games in progress block their players from joining a lobby: finish or `/match void` them first.
+When you are done, `python -m bot.features.roster reset --keep-roster --yes` removes the games (and
+`reset --yes` followed by `seed` rebuilds the roster from scratch).
 
-(The guild id defaults to `GUILD_ID` and your id to the first `ADMIN_USER_IDS`; the file name must
-contain "demo".) It plays 22 games through the real services, so ratings and tiers are consistent:
-14 regular players (**Demo Tu** is you, **Demo Bot** is the bot, ten friends, two newcomers still in
-placement), plus "Demo Extra NN" players that only fill the unfinished games. Game states: confirmed
-by players, by an admin and automatically, corrected, voided before and after the result, contested,
-reported and in progress. Stats are validated, pending or missing; one of your games has a played
-role that differs from the assigned one; you have two Riot accounts and three friends one each, with
-ranked history. Only you and the bot have real IDs, so with Discord's user picker you can inspect
-**your** and **the bot's** profile, history and stats; everyone else shows up in `/leaderboard`,
-`/match show` and the games. The reported game is auto-confirmed about 20 minutes after seeding, so
-look at it first (reseed with `--force` to get it back). A database cannot hold the *lobby message*
-of an open or scheduled lobby: use `/lobby open`, `/lobby schedule` and `/mock` for those.
-
-**2. Mock players on your dev database** (see [docs/testing-lobbies.md](docs/testing-lobbies.md)):
+**2. Mock players on your database** (see [docs/testing-lobbies.md](docs/testing-lobbies.md)):
 `ENABLE_MOCK_PLAYERS=true`, `/register`, `/lobby open`, `/mock fill`, `/mock ready`, **Pronto**,
 **Confirmar**, `/mock report`, and so on. `/mock clear` removes them and their games afterwards.
 
@@ -209,7 +206,7 @@ of an open or scheduled lobby: use `/lobby open`, `/lobby schedule` and `/mock` 
 | `/register Ana` | Private: "Registado como **Ana**! Define as tuas roles com /profile roles e o teu rank com /profile rank." A second `/register`, or a nickname already taken: a private error. |
 | `/profile roles role:Mid proficiency:5` | Private: "Proficiência em **Mid** definida para 5/5." (`Limpar`: "limpa"). |
 | `/profile rank tier:Gold division:II` | Private: "Rank de referência: **Gold II**. Serve só como ponto de partida; ..." |
-| `/profile view` | Public embed: *Rank do grupo* (or "Sem rank (colocação n/5)"), *Rank League (referência)*, Riot accounts if any, *Roles* with icons; the footer says the rank is internal and carries the Riot notice. |
+| `/profile view` | Public embed: *Rank do grupo* (tier, division and a progress bar toward the next division, full on the top step; or "Sem rank (colocação n/5)"), *Rank League (referência)*, Riot accounts if any, *Roles* with icons; the footer says the rank is internal and carries the Riot notice. |
 | `/lobby open` | Public lobby message "In-house #n · Aberta" with buttons. A second open: a private error. |
 | `/mock fill`, `/mock ready`, then **Pronto** | Ready-check ping, then balanced teams (Azul/Vermelho) with a role icon per player and no ratings shown. |
 | **Confirmar**, then `/mock report winner:Azul` | "Resultado por confirmar"; **Confirmar resultado** / **Contestar** appear for the other team. As an admin your confirm is final at once; otherwise use `/mock confirm`. |
@@ -227,6 +224,60 @@ of an open or scheduled lobby: use `/lobby open`, `/lobby schedule` and `/mock` 
 | `/sync` | Private: "Sincronizados n comandos." (bot owner only; anyone else is refused). |
 | A non-admin running an admin command | Private: "Não tens permissão para usar este comando." An unexpected failure: "Ocorreu um erro inesperado. Tenta novamente mais tarde." |
 | `/puta`, `/putaindor` | Public name-of-the-day embeds ("Ainda não há ranking; usa /puta para começar." before any pick). |
+
+## The group's roster
+
+The group's database starts from a roster file, so everyone is registered, ranked and linked before
+the bot goes live. The tool is `python -m bot.features.roster` (stop the bot first; every command that
+writes makes a backup copy next to the database, `*.sqlite3.bak-<time>-<reason>`).
+
+1. **Fill the file.** Copy `tools/roster.example.json` to `data/roster.json` (git-ignored: it holds real
+   Discord ids and Riot names) and fill one entry per player: `discord_id`, `nickname` (2-24
+   characters, unique), `rank` (tier and division, or `null`), `roles` (role to proficiency 1-5),
+   `riot` (a list of `Name#TAG`, the first is the main account), `platform` and, optionally,
+   `strength`. The file explains each field at the top.
+2. **Check it.** `python -m bot.features.roster check` reads the file, lists every problem at once
+   (wrong tier, duplicate id, bad Riot ID...) and shows each player with the strength a simulation
+   would use. It changes nothing.
+3. **Seed the database.** `python -m bot.features.roster seed` registers everyone through the same
+   services as `/register`, `/profile rank` and `/profile roles`, and links the Riot accounts through
+   the real `/riot link` process (needs `RIOT_API_KEY`; with `--no-riot` they are skipped). It can be
+   run again: players already there are kept, only a changed rank or role is applied, and accounts
+   already linked are skipped. The `/puta` names, phrases and history are never touched.
+   It prints each player as it goes and finishes in a couple of minutes. The ranked-history download
+   (up to 100 games per account, about one request every two seconds on a personal key) is *not*
+   done here: the bot continues it in the background when it starts. `--wait-history` does it now
+   (expect an hour). Press Ctrl+C at any time; running `seed` again continues. The first line of every
+   command shows which database it uses and where that came from. If it says `DB_PATH environment
+   variable` and you did not mean it, clear it (`Remove-Item Env:DB_PATH` in PowerShell).
+4. **Play test games with the real players** (optional, for reviewing the bot's messages):
+   `python -m bot.features.roster games` plays 22 finished games through the real lobby, balancer and
+   rating services, plus a contested, a reported and an in-progress game. Who wins follows each
+   player's hidden `strength` (the file's value, or one derived from the rank), so you can tweak it
+   for people you know are over- or under-ranked. Two newcomers stay in placement. The three
+   unfinished games are completed with mock players (`Mock Extra NN`), because nobody can be in two
+   games at once. Options: `--games`, `--newcomers`, `--seed`, `--guild-id`.
+5. **Judge the matchmaking.** `python -m bot.features.roster matches` lists every game in order,
+   lane by lane: blue against red, each player's matchmaking estimate (E, in rating points), the gap per
+   lane, the balancer's expected win chance, the winner, and whether the favourite or the underdog
+   won. It ends with a summary (how many games were near even, how often the favourite won, the
+   average lane gap, the most lopsided game). `--match 12` shows one game, `--finished` skips
+   voided and unfinished ones. It only reads the file, so it is safe while the bot runs. In Discord,
+   `/match show match:12` posts one game's teams, but never the numbers.
+6. **Go back to a clean database.** `python -m bot.features.roster reset` shows what would be removed
+   and changes nothing; with `--yes` it deletes **all league data**: players, roles, ranks, Riot
+   accounts and their stored games, ratings, lobbies, games and mock players. Run `seed` afterwards
+   to put the roster back. The `/puta` names, phrases and picks, the champion list and the uploaded
+   icon ids always stay. `reset --keep-roster --yes` is the lighter version: it removes only the test
+   games, lobbies, rating adjustments and mock players and keeps the roster (use it to replay `games`).
+
+   To prepare production: `reset --yes`, then `seed`, and do not run `games`. The database then holds
+   the fresh roster and the `/puta` data, nothing else.
+
+The roster's own rows are dated just before the first test game (so the history can sit in the past);
+`games` refuses to run on a database that already has games, run `reset --keep-roster --yes` first. To pick a
+player in `/profile view`, `/history` or `/stats`, that person must be a member of the server you
+test in; everyone else still shows up in `/leaderboard`, `/match show` and the games.
 
 ## Getting started
 
@@ -257,8 +308,8 @@ of an open or scheduled lobby: use `/lobby open`, `/lobby schedule` and `/mock` 
    commands to your server.
 
 To try the lobby alone, set `ENABLE_MOCK_PLAYERS=true` and `ADMIN_USER_IDS` to your own user ID, then
-follow [docs/testing-lobbies.md](docs/testing-lobbies.md). To review every embed with realistic data,
-build the demo database; both ways are described in [Testing the commands](#testing-the-commands).
+follow [docs/testing-lobbies.md](docs/testing-lobbies.md). To review every embed with the real group,
+seed the roster and play test games; both ways are described in [Testing the commands](#testing-the-commands).
 
 ## Configuration
 
@@ -309,8 +360,9 @@ bot/
     matches/       match records: results, confirmations, corrections, audit
     stats/         read-only /history, /stats and /leaderboard from confirmed games
     simulation/    scenarios, simulated seasons and the tuning lab (not loaded by the bot)
+    roster/        roster file, seeding, test games with the real players, reset (not loaded by the bot)
 tests/             pytest, in-memory SQLite
-tools/             dev-only scripts (ladder_sim.py; seed_demo.py builds a demo database)
+tools/             dev-only scripts (ladder_sim.py) and the roster file template
 docs/              internal documentation
 ```
 
@@ -334,7 +386,7 @@ The internal documentation lives in [`docs/`](docs/README.md):
 - [Ratings, ranks and matchmaking](docs/matchmaking.md): how it all works in detail.
 - [Simulations](docs/simulations.md): how to test and tune without Discord.
 - [Tuning](docs/tuning.md): how the settings were chosen, with results.
-- [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot policy notes](docs/riot-policy.md).
+- [UI pass guide](docs/ui-pass-guide.md) (every command, step by step, with a worksheet), [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot policy notes](docs/riot-policy.md).
 
 ## Roadmap
 

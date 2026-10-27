@@ -7,10 +7,15 @@ from discord import app_commands
 from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
 from bot.features.players.admin import InhouseAdmin, build_inspection_embed
-from bot.features.players.cog import Players, build_profile_embed, progress_bar
+from bot.features.players.cog import (
+    Players,
+    build_profile_embed,
+    in_house_rank_text,
+    progress_bar,
+)
 from bot.features.players.repository import PlayerRepository
 from bot.features.players.service import PlayerService
-from bot.features.ratings.ladder import DEFAULT_LADDER
+from bot.features.ratings.ladder import DEFAULT_LADDER, Standing
 from bot.features.ratings.params import MatchmakingParams
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingService
@@ -70,6 +75,15 @@ async def test_register_command_replies_ephemerally_and_rejects_duplicates(stack
     second = fake_interaction(1)
     await players_cog.register.callback(players_cog, second, "Ana2")
     assert "Já estás registado" in second.response.sent[0]["content"]
+
+
+def test_the_group_rank_has_a_progress_bar_and_the_top_step_a_full_one():
+    def text(standing):
+        return in_house_rank_text(SimpleNamespace(standing=standing), DEFAULT_LADDER)  # type: ignore[arg-type]
+
+    assert text(Standing(12, True, "no_box", 2, 0.6)) == "No Box II ▰▰▰▰▰▰▱▱▱▱"
+    assert text(Standing(12, True, "kd_esports", None, None)) == "KD esports " + "▰" * 10
+    assert text(Standing(3, False)) == "Sem rank (colocação 3/5)"
 
 
 async def test_profile_embed_shows_group_rank_but_no_raw_numbers(stack):
