@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from bot.features.icons.roles import RoleIconService
 from bot.features.lobby.mock import MockPlayers
 from bot.features.lobby.render import (
     build_list_embed,
@@ -19,12 +20,13 @@ from bot.features.lobby.render import (
     result_summary,
     scheduled_ping,
     stats_suffix,
+    validation_footer,
 )
 from bot.features.lobby.repository import ACTIVE, LobbyRepository, LobbyRow
 from bot.features.lobby.schedule import EXAMPLES
 from bot.features.lobby.service import LobbyParams, LobbyService, LobbySnapshot, LobbyUpdate
 from bot.features.lobby.views import LobbyView, state_of
-from bot.features.matches.repository import MatchRepository
+from bot.features.matches.repository import PENDING, MatchRepository
 from bot.features.matches.service import MAX_STAT, MatchParams, MatchService, stats_text
 from bot.features.players.choices import ROLE_CHOICES
 from bot.features.players.service import PlayerError
@@ -44,10 +46,20 @@ WINNER_CHOICES = [
 
 
 class Lobby(commands.Cog):
-    def __init__(self, bot: "KDBot", service: LobbyService, mock: MockPlayers) -> None:
+    def __init__(
+        self,
+        bot: "KDBot",
+        service: LobbyService,
+        mock: MockPlayers,
+        icons: RoleIconService | None = None,
+    ) -> None:
         self.bot = bot
         self.service = service
         self.mock = mock
+        self.icons = icons  # role icons; None or empty means role names
+
+    def _role_icons(self) -> dict[str, str]:
+        return self.icons.markup() if self.icons is not None else {}
 
     lobby = app_commands.Group(name="lobby", description="Lobbies de in-house.")
     match_group = app_commands.Group(name="match", description="Jogos e resultados de in-house.")
@@ -89,7 +101,9 @@ class Lobby(commands.Cog):
 
     def message_kwargs(self, snapshot: LobbySnapshot) -> dict:
         view = LobbyView(self, state_of(snapshot))
-        embed = build_lobby_embed(snapshot, self.service.matches.params.auto_confirm_minutes)
+        embed = build_lobby_embed(
+            snapshot, self.service.matches.params.auto_confirm_minutes, self._role_icons()
+        )
         return {"embed": embed, "view": view if view.children else None}
 
     async def refresh_message(self, snapshot: LobbySnapshot) -> None:
@@ -298,7 +312,7 @@ class Lobby(commands.Cog):
 
     # --- /match ----
 
-    @match_group.command(name="show", description="Mostra um jogo: estado, equipas e histórico.")
+    @match_group.command(name="show", description="Mostra um jogo: equipas, campeões e KDA.")
     @app_commands.describe(match="O número do jogo (por defeito, o mais recente).")
     async def match_show(self, interaction: discord.Interaction, match: int | None = None) -> None:
         repo = self.service.matches.repo
@@ -310,7 +324,11 @@ class Lobby(commands.Cog):
             await interaction.response.send_message("Não encontrei esse jogo.", ephemeral=True)
             return
         people = await repo.participants(row.id)
-        names = await self.service.players.repo.get_many([p.player_id for p in people])
+        validator_ids = {p.stats_validated_by for p in people if p.stats_validated_by}
+        wanted = [p.player_id for p in people] + list(validator_ids)
+        if row.confirmed_by:
+            wanted.append(row.confirmed_by)
+        names = await self.service.players.repo.get_many(wanted)
         champion_ids = [p.champion for p in people if p.champion]
         champions = await self._champion_names(champion_ids)
         icons = await self._champion_icons(champion_ids)
@@ -319,33 +337,24 @@ class Lobby(commands.Cog):
             champion = p.champion or ""
             teams[p.side].append(
                 (
-                    p.role,
+                    p.played_role or p.role,  # what was actually played, when an admin recorded it
                     names[p.player_id].nickname if p.player_id in names else "?",
                     stats_suffix(p, champions.get(champion), icons.get(champion, "")),
                 )
             )
-        audit = []
-        for entry in await repo.audit(row.id):
-            actor = (
-                await self.service.players.repo.get_by_discord(entry.actor_id)
-                if entry.actor_id is not None
-                else None
-            )
-            subject = (
-                (await self.service.players.repo.get_many([entry.subject_id])).get(entry.subject_id)
-                if entry.subject_id is not None
-                else None
-            )
-            audit.append(
-                (entry, actor.nickname if actor else "Bot", subject.nickname if subject else None)
-            )
+        footer = validation_footer(
+            row,
+            names[row.confirmed_by].nickname if row.confirmed_by in names else None,
+            sorted({names[i].nickname for i in validator_ids if i in names}),
+            sum(p.stats_status == PENDING for p in people),
+        )
         await interaction.response.send_message(
-            embed=build_match_embed(row, teams, audit, icons_shown=bool(icons)),
+            embed=build_match_embed(row, teams, footer, self._role_icons()),
             allowed_mentions=NO_MENTIONS,
         )
 
     @match_group.command(name="void", description="Anula um jogo, sem efeito nos ratings (admin).")
-    @app_commands.describe(match="O número do jogo.", reason="Motivo (aparece no histórico).")
+    @app_commands.describe(match="O número do jogo.", reason="Motivo (aparece no jogo).")
     @admin_only
     async def match_void(
         self, interaction: discord.Interaction, match: int, reason: str = "anulado por um admin"
@@ -729,6 +738,7 @@ async def setup(bot: "KDBot") -> None:
         service,
         settings.mock_players,
     )
-    await bot.add_cog(Lobby(bot, service, mock))
+    icons_cog = bot.get_cog("Icons")
+    await bot.add_cog(Lobby(bot, service, mock, getattr(icons_cog, "roles", None)))
     if settings.mock_players:
         log.warning("ENABLE_MOCK_PLAYERS is on: /mock commands are available (testing only).")

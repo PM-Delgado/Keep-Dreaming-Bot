@@ -7,6 +7,7 @@ from datetime import timedelta
 import discord
 
 from bot.features.balance.model import BAND_CLEAR, BAND_EVEN, BAND_LOPSIDED, BAND_SLIGHT
+from bot.features.icons.roles import role_prefix
 from bot.features.lobby.repository import (
     CANCELLED,
     COMPLETED,
@@ -17,11 +18,9 @@ from bot.features.lobby.repository import (
     TEAMS_PROPOSED,
 )
 from bot.features.lobby.service import EntryView, LobbySnapshot, ProposalView, SlotView
-from bot.features.matches.repository import AuditRow, MatchRow, ParticipantRow
-from bot.features.matches.service import StandingChange, stats_text
-from bot.features.players.proficiency import ROLE_NAMES_PT
+from bot.features.matches.repository import PENDING, MatchRow, ParticipantRow
+from bot.features.matches.service import StandingChange, kda_text
 from bot.features.ratings.ladder import LadderConfig, step_rank
-from bot.features.riot.legal import RIOT_NOTICE
 
 STATUS_TEXT = {
     OPEN: "Aberta",
@@ -82,14 +81,19 @@ def fit_note(slot: SlotView) -> str:
     return f" · {slot.fit if slot.fit is not None else '?'}/5"
 
 
-def team_text(slots: list[SlotView]) -> str:
+def team_text(slots: list[SlotView], roles: Mapping[str, str] | None = None) -> str:
+    """One line per slot: the role icon (or the role's name) and the player."""
     return "\n".join(
-        f"**{ROLE_NAMES_PT[s.role]}** — {discord.utils.escape_markdown(s.nickname)}{fit_note(s)}"
+        f"{role_prefix(s.role, roles)}{discord.utils.escape_markdown(s.nickname)}{fit_note(s)}"
         for s in slots
     )
 
 
-def build_lobby_embed(snapshot: LobbySnapshot, auto_confirm_minutes: int = 30) -> discord.Embed:
+def build_lobby_embed(
+    snapshot: LobbySnapshot,
+    auto_confirm_minutes: int = 30,
+    roles: Mapping[str, str] | None = None,
+) -> discord.Embed:
     lobby = snapshot.lobby
     status = lobby.status
     scheduled_open = lobby.kind == "scheduled" and status == OPEN
@@ -127,7 +131,7 @@ def build_lobby_embed(snapshot: LobbySnapshot, auto_confirm_minutes: int = 30) -
         )
 
     if status in (TEAMS_PROPOSED, IN_PROGRESS, COMPLETED):
-        _add_teams(embed, snapshot)
+        _add_teams(embed, snapshot, roles)
     if status in (IN_PROGRESS, COMPLETED):
         _describe_game(embed, snapshot, auto_confirm_minutes)
 
@@ -140,13 +144,15 @@ def build_lobby_embed(snapshot: LobbySnapshot, auto_confirm_minutes: int = 30) -
     return embed
 
 
-def _add_teams(embed: discord.Embed, snapshot: LobbySnapshot) -> None:
+def _add_teams(
+    embed: discord.Embed, snapshot: LobbySnapshot, roles: Mapping[str, str] | None = None
+) -> None:
     proposal = snapshot.proposal
     if proposal is None:
         embed.description = "Não consegui formar equipas. Um admin pode cancelar e recomeçar."
         return
-    embed.add_field(name=f"{SIDE_EMOJI['blue']} Azul", value=team_text(proposal.blue))
-    embed.add_field(name=f"{SIDE_EMOJI['red']} Vermelho", value=team_text(proposal.red))
+    embed.add_field(name=f"{SIDE_EMOJI['blue']} Azul", value=team_text(proposal.blue, roles))
+    embed.add_field(name=f"{SIDE_EMOJI['red']} Vermelho", value=team_text(proposal.red, roles))
     embed.add_field(name="Equilíbrio", value=band_text(proposal), inline=False)
 
 
@@ -278,29 +284,40 @@ MATCH_STATUS_TEXT = {
     "confirmed": "Confirmado",
     "voided": "Anulado",
 }
-AUDIT_TEXT = {
-    "report": "reportou",
-    "confirm": "confirmou",
-    "auto_confirm": "confirmação automática",
-    "contest": "contestou",
-    "set_winner": "corrigiu o vencedor",
-    "void": "anulou",
-    "stats": "registou stats de",
-    "stats_set": "definiu stats de",
-    "stats_validate": "validou stats de",
-}
-STATS_MARK = {"pending": "⏳", "validated": "✅"}
+PENDING_MARK = "⏳"
 
 
 def stats_suffix(p: ParticipantRow, champion_name: str | None, icon: str = "") -> str:
-    """ " · <icon> Ahri 8/2/11 ✅" for a player with stats (⏳ until an admin validates them).
+    """ " — <icon> 8/2/11" for a player with stats: the champion's icon, else its name, then KDA.
 
-    `icon` is the champion's emoji markup, when its icon is available.
+    ⏳ is added while an admin has not validated the stats; validated stats carry no mark (the
+    footer says who validated).
     """
     if not p.has_stats:
         return ""
-    text = discord.utils.escape_markdown(stats_text(p, champion_name))
-    return f" · {icon + ' ' if icon else ''}{text} {STATS_MARK[p.stats_status]}"
+    kda = kda_text(p.kills, p.deaths, p.assists)
+    if icon:
+        body = f" — {icon} {kda}"
+    else:
+        body = f" · {discord.utils.escape_markdown(champion_name or p.champion or '?')} {kda}"
+    return body + (f" {PENDING_MARK}" if p.stats_status == PENDING else "")
+
+
+def validation_footer(
+    match: MatchRow, confirmed_by: str | None, validators: Sequence[str], pending: int
+) -> str | None:
+    """Who confirmed the result and who validated the KDAs (only for a confirmed game)."""
+    if match.status != "confirmed":
+        return None
+    result = "Resultado confirmado automaticamente"
+    if not match.auto_confirmed:
+        result = f"Resultado confirmado por {confirmed_by or '?'}"
+    parts = [result]
+    if validators:
+        parts.append(f"KDAs validados por {', '.join(validators)}")
+    if pending:
+        parts.append(f"{pending} por validar")
+    return " · ".join(parts)
 
 
 def build_pending_embed(items: Sequence[tuple[int, str, str]]) -> discord.Embed:
@@ -322,10 +339,11 @@ def build_pending_embed(items: Sequence[tuple[int, str, str]]) -> discord.Embed:
 def build_match_embed(
     match: MatchRow,
     teams: Mapping[str, Sequence[tuple[str, str, str]]],
-    audit: Sequence[tuple[AuditRow, str, str | None]],
-    icons_shown: bool = False,
+    footer: str | None = None,
+    roles: Mapping[str, str] | None = None,
 ) -> discord.Embed:
-    """/match show: status, winner, who played what (role, name, stats suffix), and who did what."""
+    """/match show: status, winner, and one line per player: role icon (or name), player, then the
+    stats suffix. `footer` says who confirmed the result and validated the KDAs."""
     embed = discord.Embed(
         title=f"Jogo #{match.id} · {MATCH_STATUS_TEXT[match.status]}",
         color=discord.Color.green() if match.status == "confirmed" else discord.Color.dark_grey(),
@@ -336,21 +354,12 @@ def build_match_embed(
         embed.description = f"Anulado ({match.void_reason or 'sem motivo'})."
     for side in ("blue", "red"):
         lines = [
-            f"**{ROLE_NAMES_PT[role]}** — {discord.utils.escape_markdown(name)}{suffix}"
+            f"{role_prefix(role, roles)}{discord.utils.escape_markdown(name)}{suffix}"
             for role, name, suffix in teams.get(side, ())
         ]
         embed.add_field(name=f"{SIDE_EMOJI[side]} {SIDE_NAME[side]}", value="\n".join(lines) or "—")
-    if audit:
-        history = [
-            f"<t:{int(row.created_at.timestamp())}:f> · {discord.utils.escape_markdown(who)} "
-            f"{AUDIT_TEXT.get(row.action, row.action)}"
-            + (f" {discord.utils.escape_markdown(subject)}" if subject else "")
-            + (f": {row.new_value}" if row.action == "void" and row.new_value else "")
-            for row, who, subject in audit[-10:]
-        ]
-        embed.add_field(name="Histórico", value="\n".join(history), inline=False)
-    if icons_shown:  # Riot asks for this wherever its images appear
-        embed.set_footer(text=RIOT_NOTICE)
+    if footer:
+        embed.set_footer(text=footer)
     return embed
 
 

@@ -392,3 +392,46 @@ async def test_migration_4_keeps_existing_games_and_adds_null_stats(tmp_path):
 def test_sqlite_has_the_window_functions_the_history_queries_rely_on():
     # recent_games/observations use ROW_NUMBER() (SQLite 3.25+).
     assert sqlite3.sqlite_version_info >= (3, 25)
+
+
+def test_format_line_shows_champion_and_role_as_icons_when_both_exist():
+    line = format_line(
+        to_entry(stored()), NOW, champion_icon="<:champ_Ahri:1>", role_icon="<:role_mid:2>"
+    )
+    assert line.startswith("✅ <:champ_Ahri:1> <:role_mid:2> · 7/2/9 (8.0 KDA)")
+    words = line.replace("<:champ_Ahri:1>", "").replace("<:role_mid:2>", "")
+    assert "Ahri" not in words and "Mid" not in words  # no words where icons say it
+    assert "192 CS (6.2/min)" in line and "há 2 d" in line
+
+
+def test_format_line_falls_back_to_text_for_whichever_icon_is_missing():
+    only_champion = format_line(to_entry(stored()), NOW, champion_icon="<:champ_Ahri:1>")
+    assert only_champion.startswith("✅ <:champ_Ahri:1> · Mid · 7/2/9")
+    only_role = format_line(to_entry(stored()), NOW, role_icon="<:role_mid:2>")
+    assert only_role.startswith("✅ **Ahri** · <:role_mid:2> · 7/2/9")
+
+
+def test_format_line_uses_the_display_name_when_there_is_no_champion_icon():
+    entry = to_entry(stored(champion="MonkeyKing"))
+    assert format_line(entry, NOW).startswith("✅ **MonkeyKing**")  # Riot's id, as before
+    assert format_line(entry, NOW, champion_name="Wukong").startswith("✅ **Wukong**")
+
+
+async def test_history_embed_uses_icons_and_display_names_from_the_maps(stack, world):
+    world.add_game("puuid-alpha", "A_1", "MIDDLE", days_ago(NOW, 1), champion="MonkeyKing")
+    world.add_game("puuid-alpha", "A_2", "UTILITY", days_ago(NOW, 2), champion="Ahri")
+    await stack.riot.link(1, "Alpha#EUW", None, 99)
+    await stack.riot.wait_for_background()
+    view = await stack.riot.recent_history(1)
+    embed = build_history_embed(
+        view,
+        NOW,
+        champion_names={"MonkeyKing": "Wukong", "Ahri": "Ahri"},
+        champion_icons={"MonkeyKing": "<:champ_MonkeyKing:7>"},
+        role_icons={"MID": "<:role_mid:8>"},
+    )
+    lines = (embed.description or "").split("\n\n")[1].split("\n")
+    wukong = next(line for line in lines if "champ_MonkeyKing" in line)
+    assert "<:champ_MonkeyKing:7> <:role_mid:8>" in wukong
+    ahri = next(line for line in lines if "Ahri" in line)
+    assert "**Ahri**" in ahri and "Suporte" in ahri  # no icon for either: text fallback

@@ -37,6 +37,8 @@ rank that moves as games are played.
 - **Ratings and ranks.** Each player has a hidden in-house rating seeded from their League rank and
   changed only by confirmed results. The visible in-house rank (Bot Máximo to KD esports) appears
   after five games.
+- **Champion and KDA per game.** Players enter their own stats, an admin validates them; champion
+  and role icons show up in lobbies, matches, profiles and Riot history.
 - **Optional Riot integration.** Link a League account to seed the rating from the Solo/Duo rank, and
   to estimate role experience and show recent ranked games.
 - **Test without ten friends.** Mock players and a simulator let you try lobbies, results and ranks
@@ -95,7 +97,7 @@ need your Discord user ID in `ADMIN_USER_IDS`.
 | `/lobby list` | Show the open lobby and the scheduled ones. |
 | `/lobby show [lobby]` | Re-post a lobby message (also removes the stale copy). |
 | `/lobby cancel [lobby]` | Cancel a lobby (creator or admin). |
-| `/match show [match]` | A game's status, teams and history. |
+| `/match show [match]` | A game's status, teams, champions and KDA; the footer says who confirmed the result and who validated the KDAs. |
 | `/match void <match> [reason]` | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
 | `/match fix <match> <winner>` | *Admin.* Correct a confirmed result or decide a pending or contested one. |
 | `/match stats <champion> <kills> <deaths> <assists> [match]` | Record your own champion and KDA for a confirmed game (default: your latest game without validated stats). Waits for an admin to validate it. |
@@ -116,7 +118,7 @@ The lobby message carries the buttons: **Entrar**, **Sair**, **Pronto**, **Recus
 | `/riot unlink <riot_id> [player]` | Remove an account and all data tied to it. |
 | `/riot list [player]` | List linked accounts (visible to everyone). |
 | `/riot refresh [player]` | Refresh names, rank and ranked history (10 minute cooldown for players). |
-| `/riot history [player] [riot_id]` | Last ten ranked Solo/Duo games: result, champion, role, KDA, CS, duration. |
+| `/riot history [player] [riot_id]` | Last ten ranked Solo/Duo games: result, champion and role (icons), KDA, CS, duration. |
 
 ### Admin
 
@@ -195,7 +197,7 @@ Read once at startup from the environment or `.env` (`bot/config.py`).
 | `RIOT_API_KEY` | no | | Enables the `/riot` commands. Without it ranks and roles are set manually. |
 | `RIOT_DEFAULT_PLATFORM` | no | `euw1` | Platform used when `/riot link` does not specify one. |
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
-| `CHAMPION_ICONS` | no | on | Show champion icons (Riot Data Dragon images, uploaded once as bot emojis) next to players' stats. `false` turns them off; see `docs/riot-policy.md`. |
+| `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis) in lobbies, `/match show`, `/profile` and `/riot history`; names are used where an icon is missing. `false` turns them off; see `docs/riot-policy.md`. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
 
 **Data.** Everything is in one SQLite file (plus `-wal` and `-shm` files while the bot runs). Back it
@@ -223,6 +225,7 @@ bot/
     players/       roster, role proficiency, profile, admin rating and role commands
     riot/          optional Riot API client, role experience, /riot commands
     champions/     champion list from Data Dragon (cached, with a bundled seed) for /match stats
+    icons/         role icons (bundled PNGs uploaded as application emojis), shared upload helper
     ratings/       pure rating core: rank estimate, matchmaking estimate, ladder, OpenSkill, replay
     balance/       pure team balancer
     lobby/         lobby state machine, messages, buttons, /lobby /match /mock commands
@@ -262,7 +265,7 @@ The internal documentation lives in [`docs/`](docs/README.md):
 - [x] Lobbies, ready-check, scheduled lobbies and role-aware balanced teams
 - [x] Result reporting, confirmation, corrections, ratings from games
 - [x] Simulator and tuning lab
-- [ ] Champion and KDA entry with admin validation
+- [x] Champion and KDA entry with admin validation, champion and role icons
 - [ ] Match history, personal stats and leaderboards
 - [ ] Optional captain draft
 

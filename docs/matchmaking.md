@@ -179,7 +179,7 @@ OPEN -> READY_CHECK -> TEAMS_PROPOSED -> IN_PROGRESS -> COMPLETED
    channel gets the promotion/placement summary.
 6. **Corrections**: `/match void` (undoes the effect if it had been confirmed) and `/match fix`
    (flips a confirmed result) replay everything again. Every step is kept in an audit trail
-   (`/match show`).
+   (the `match_audit` table; `/match show` does not display it, only who confirmed and validated).
 7. **Champion and KDA** (after step 5 only). Each player records their champion and
    kills/deaths/assists with `/match stats`; that entry is *pending* until an admin validates it
    (`/match validate`, `/match pending` lists them). Admin entries (`/match set`) are validated at
