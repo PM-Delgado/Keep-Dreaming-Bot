@@ -41,6 +41,7 @@ class LobbyStack:
         self.repo = LobbyRepository(db)
         self.match_repo = MatchRepository(db)
         self.ratings.matches_source = self.match_repo.confirmed_for_replay
+        self.ratings.form_source = self.match_repo.recent_results
         self.matches = MatchService(
             self.match_repo,
             self.repo,

@@ -11,6 +11,7 @@ from bot.features.players.cog import Players, build_profile_embed, progress_bar
 from bot.features.players.repository import PlayerRepository
 from bot.features.players.service import PlayerService
 from bot.features.ratings.ladder import DEFAULT_LADDER
+from bot.features.ratings.params import MatchmakingParams
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingService
 
@@ -106,7 +107,7 @@ async def test_inspection_embed_is_the_only_place_with_raw_numbers(stack):
     inspection = await ratings.inspect(player.id)
     text = embed_text(build_inspection_embed("Ana", inspection, "colocação 0/5"))
     assert "mu 31.20" in text
-    assert "sigma 6.50" in text
+    assert f"sigma {MatchmakingParams().sigma_rank_seed:.2f}" in text
 
 
 def walk(command):

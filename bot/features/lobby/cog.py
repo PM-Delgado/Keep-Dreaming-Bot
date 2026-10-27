@@ -513,6 +513,7 @@ async def setup(bot: "KDBot") -> None:
     lobbies = LobbyRepository(bot.db)
     match_repo = MatchRepository(bot.db)
     players_cog.ratings.matches_source = match_repo.confirmed_for_replay  # type: ignore[attr-defined]
+    players_cog.ratings.form_source = match_repo.recent_results  # type: ignore[attr-defined]
     matches = MatchService(
         match_repo,
         lobbies,

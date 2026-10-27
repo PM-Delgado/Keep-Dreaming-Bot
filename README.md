@@ -1,83 +1,273 @@
 # Keep-Dreaming-Bot
 
-Private Discord bot for a friends' server.
+A Discord bot for a private group of friends. It started as a "name of the day" joke and is now a
+**League of Legends in-house league manager**: sign-ups and scheduled lobbies, ready-checks, balanced
+teams that respect everyone's roles, result reporting, and a hidden rating with a visible in-house
+rank that moves as games are played.
 
-## Commands (slash commands, registered only in the configured server)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![discord.py 2.4+](https://img.shields.io/badge/discord.py-2.4%2B-5865F2)
+![Linted with ruff](https://img.shields.io/badge/lint-ruff-261230)
+![Type-checked with pyright](https://img.shields.io/badge/types-pyright-informational)
 
-| Command | Behaviour |
+> The bot talks to players in Portuguese. This README and the documentation are in English.
+
+## Contents
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Commands](#commands)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+- [Riot Games disclaimer](#riot-games-disclaimer)
+
+## Features
+
+- **In-house lobbies.** One live message with buttons; ten players start a ready-check, silent
+  players are replaced from the reserves. Lobbies can be opened now or scheduled for later, with a
+  reminder before the start. State survives restarts.
+- **Balanced teams without role picking.** Players never choose a role per game. Each is placed from
+  their profile (best role, or next best when roles collide), and similar-strength players meet in the
+  same lane.
+- **Results and corrections.** A player reports the winner, someone on the other team confirms (or
+  it confirms itself after 30 minutes). Admins can void or fix any game, with an audit trail.
+- **Ratings and ranks.** Each player has a hidden in-house rating seeded from their League rank and
+  changed only by confirmed results. The visible in-house rank (Bot Máximo to KD esports) appears
+  after five games.
+- **Optional Riot integration.** Link a League account to seed the rating from the Solo/Duo rank, and
+  to estimate role experience and show recent ranked games.
+- **Test without ten friends.** Mock players and a simulator let you try lobbies, results and ranks
+  alone, and tune the matchmaking offline.
+- **Name of the day.** `/puta` and `/putaindor`, the original feature, still run.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Open or schedule a lobby] --> B[Ten sign up]
+    B --> C[Ready-check]
+    C --> D[Balanced teams proposed]
+    D --> E[Creator or admin confirms]
+    E --> F[Game is played]
+    F --> G[Winner reported]
+    G --> H{Other team confirms?}
+    H -- yes, or 30 min pass --> I[Ratings and ranks update]
+    H -- contests --> J[Admin decides]
+    J --> I
+```
+
+Three ideas to keep in mind:
+
+1. **Your League rank is the starting point, results take over.** A player's starting strength comes
+   from their Riot rank (or one an admin or they set). In-house results then move a separate hidden
+   rating, while the starting rank keeps matchmaking from drifting too far from reality.
+2. **The in-house rank is its own thing.** It is derived from the hidden rating, hidden until a
+   player has finished five placement games, and is not a League rank.
+3. **Only confirmed results count.** Every change to a result is audited, and ratings can always be
+   rebuilt from the stored games.
+
+The details (formulas, parameters, how teams are scored) are in
+[docs/matchmaking.md](docs/matchmaking.md).
+
+## Commands
+
+All commands are slash commands, registered only in the configured server. Commands marked *admin*
+need your Discord user ID in `ADMIN_USER_IDS`.
+
+### Players
+
+| Command | What it does |
 |---|---|
-| `/puta` | Shows today's name. If today (Europe/Lisbon date) has no pick yet, one is chosen at random and stored. |
-| `/putaindor` | Podium of the 3 most-picked names (a pick = one day's name). |
-| `/sync` | Owner-only. Re-syncs the commands to the server (this also happens on startup). |
-| `/register nickname` | Joins the in-house roster (starts with a default hidden rating). |
+| `/register <nickname>` | Join the in-house roster. |
 | `/profile view [user]` | In-house rank (or placement progress), League reference rank, role proficiency. |
-| `/profile roles role proficiency` | Your own 1-5 proficiency on a role (or clear it). |
-| `/profile rank tier [division]` | Self-reported League Solo/Duo rank; seeds the starting rating while you have few in-house games. |
-| `/riot link riot_id [platform] [player]` | Links a Riot account (Name#TAG). The first one becomes the main; its Solo/Duo rank seeds the rating while you have few in-house games. Admins can link for others (the channel is told, with the data notice). Needs `RIOT_API_KEY`. |
-| `/riot history [player] [riot_id]` | The last 10 ranked Solo/Duo games of a player (all their accounts, or one): result, champion, role, KDA, CS, duration, age. Reads what the last sync stored (no Riot requests), visible to the group. Formatting lives in `bot/features/riot/history.py` and `build_history_embed`. |
-| `/riot main`, `/riot unlink`, `/riot refresh`, `/riot list` | Change the main account, delete an account and all data tied to it (if it was the main, the earliest-linked remaining account becomes the main), refresh names/rank/ranked history (10 min cooldown for players), list the linked accounts (visible to everyone). |
-| `/lobby schedule when [note]`, `/lobby list` | Schedule a lobby for later (Lisbon time: `21:00`, `amanhã 21h30`, `sexta 21:00`, `15/08 21:00`). People sign up in advance; 30 minutes before, the signed-up players are pinged; at the time, ten sign-ups start the ready-check (fewer: it starts as soon as the tenth joins). Several scheduled lobbies can exist at once; signing up does not block you from playing another game before. `/lobby list` shows the open and scheduled lobbies; `/lobby show lobby:<n>` and `/lobby cancel lobby:<n>` take a lobby number. |
-| `/lobby open`, `/lobby show`, `/lobby cancel` | Open the in-house lobby in this channel (one open lobby per server). A live message with buttons: **Entrar / Sair / Pronto / Recusar / Confirmar / Cancelar**. At 10 players a ready-check (default 2 min) starts; non-responders are replaced from the reserves; when all ten confirm, balanced teams are proposed (coarse balance label only). Players never choose roles: each is placed from their profile proficiency (best role, or next best when roles collide), strong players are matched against strong players in the same lane, and there is no reroll. Only the creator or an admin confirms the teams or cancels. State is in SQLite and the buttons survive restarts. `/lobby show` re-posts a lost message. |
-| Results (buttons on the lobby message) | After the teams are confirmed the game is recorded. Someone who played presses **Azul ganhou / Vermelho ganhou**; someone on the *other* team presses **Confirmar resultado** (or **Contestar**). With no objection the result is confirmed automatically after 30 minutes; a contested one waits for an admin (winner buttons, or `/match fix`). An admin's report is final at once. Only confirmed results change ratings; players are reminded after 90 minutes without a result and an unreported game is voided after 12 h. When a result is confirmed the channel gets a summary with promotions, demotions and placement progress (never raw ratings): nobody has a visible tier before their 5th confirmed game (*Colocação n/5*). |
-| `/match show [match]`, `/match void match [reason]`, `/match fix match winner` | `show` lists a game's status, teams and history. Admin only: `void` cancels a game (undoing its effect on ratings if it was confirmed), `fix` corrects a confirmed result or decides a pending one. Every action is kept in an audit trail. |
-| `/mock create|fill|ready|drop|report|confirm|list|clear` | Admin-only (`fill`, `ready` and `drop` take an optional `lobby` number for scheduled lobbies), and only with `ENABLE_MOCK_PLAYERS=true`: fake players to test lobbies alone. See `docs/testing-lobbies.md`. |
-| `/admin player register member [display_name]` | Allowlisted admins only: registers a server member in advance (identity = their Discord user ID; display name defaults to their current Discord name). Same defaults as `/register`; an already-registered member is left untouched. |
-| `/admin rating set|inspect|recompute|rank`, `/admin roles set` | Allowlisted admins only (`ADMIN_USER_IDS`): rating adjustments, diagnostics (the only place raw numbers appear), rank and proficiency overrides. |
+| `/profile roles <role> <proficiency>` | Set how comfortable you are (1-5) on a role, or clear it. |
+| `/profile rank <tier> [division]` | Report your League Solo/Duo rank; it seeds your starting rating while you have few games. |
+
+### Lobbies and games
+
+| Command | What it does |
+|---|---|
+| `/lobby open` | Open the server's in-house lobby in this channel. |
+| `/lobby schedule <when> [note]` | Schedule a lobby (Lisbon time, e.g. `21:00`, `amanhã 21h30`, `sexta 21:00`, `15/08 21:00`). |
+| `/lobby list` | Show the open lobby and the scheduled ones. |
+| `/lobby show [lobby]` | Re-post a lobby message (also removes the stale copy). |
+| `/lobby cancel [lobby]` | Cancel a lobby (creator or admin). |
+| `/match show [match]` | A game's status, teams and history. |
+| `/match void <match> [reason]` | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
+| `/match fix <match> <winner>` | *Admin.* Correct a confirmed result or decide a pending or contested one. |
+
+The lobby message carries the buttons: **Entrar**, **Sair**, **Pronto**, **Recusar**, **Confirmar**
+(teams), **Azul ganhou** / **Vermelho ganhou**, **Confirmar resultado**, **Contestar** and
+**Cancelar**. Only the buttons that make sense for the current state are shown.
+
+### Riot accounts (optional, needs `RIOT_API_KEY`)
+
+| Command | What it does |
+|---|---|
+| `/riot link <riot_id> [platform] [player]` | Link a Riot account (`Name#TAG`). The first becomes the main. Admins can link for others. |
+| `/riot main <riot_id> [player]` | Choose which account supplies the rank. |
+| `/riot unlink <riot_id> [player]` | Remove an account and all data tied to it. |
+| `/riot list [player]` | List linked accounts (visible to everyone). |
+| `/riot refresh [player]` | Refresh names, rank and ranked history (10 minute cooldown for players). |
+| `/riot history [player] [riot_id]` | Last ten ranked Solo/Duo games: result, champion, role, KDA, CS, duration. |
+
+### Admin
+
+| Command | What it does |
+|---|---|
+| `/admin player register <member> [display_name]` | Register a server member in advance. |
+| `/admin rating inspect <user>` | Show the hidden rating, rank estimate and matchmaking estimate (the only place raw numbers appear). |
+| `/admin rating set <user> <mu> [sigma]` | Adjust a player's hidden rating. |
+| `/admin rating rank <user> [tier] [division]` | Override a player's rank (leave the tier empty to clear the override). |
+| `/admin rating recompute` | Rebuild all ratings from the stored games. |
+| `/admin roles set <user> <role> <proficiency>` | Override a role proficiency. |
+| `/sync` | *Owner only.* Re-sync the commands (also done on startup). |
+
+### Testing (only with `ENABLE_MOCK_PLAYERS=true`, admin)
+
+| Command | What it does |
+|---|---|
+| `/mock create [count] [main_role]` | Create fake players. |
+| `/mock fill [count] [lobby]` | Put fake players into a lobby. |
+| `/mock ready [lobby]`, `/mock drop [lobby]` | Make the fake players confirm the ready-check, or leave. |
+| `/mock report <winner>`, `/mock confirm` | A fake player reports or confirms a result. |
+| `/mock list`, `/mock clear` | List the fake players; delete them and the test games they played. |
+
+### Name of the day
+
+| Command | What it does |
+|---|---|
+| `/puta` | Today's name (Europe/Lisbon date); picked at random on first use of the day. |
+| `/putaindor` | Podium of the three most-picked names. |
 
 A daily task also makes the pick at 00:00 Europe/Lisbon.
 
-In-house ranks (Bot Máximo, Rush Caixa, Duro que nem um rijo, No Box, KD esports) show a player's standing *within the group*; they are not League ranks.
+## Getting started
 
-## Layout
+**Requirements:** Python 3.11 or newer, and a Discord application with a bot user.
+
+1. **Create the bot.** In the [Discord Developer Portal](https://discord.com/developers/applications),
+   create an application, add a bot, and copy its token (*Bot -> Reset Token*). Invite it to your
+   server with the scopes `bot` and `applications.commands`. No privileged intents are needed.
+2. **Install.**
+
+   ```bash
+   git clone https://github.com/PM-Delgado/Keep-Dreaming-Bot.git
+   cd Keep-Dreaming-Bot
+   python -m venv .venv
+   source .venv/bin/activate        # Windows: .venv\Scripts\activate
+   pip install -e ".[dev]"
+   ```
+
+3. **Configure.** Copy `.env.example` to `.env` and fill in at least `DISCORD_TOKEN`, `GUILD_ID` and
+   `ASSETS_URL`. Never commit `.env`.
+4. **Run.**
+
+   ```bash
+   python -m bot
+   ```
+
+   On startup the bot creates the SQLite database, applies pending migrations and syncs the
+   commands to your server.
+
+To try the lobby alone, set `ENABLE_MOCK_PLAYERS=true` and `ADMIN_USER_IDS` to your own user ID, then
+follow [docs/testing-lobbies.md](docs/testing-lobbies.md).
+
+## Configuration
+
+Read once at startup from the environment or `.env` (`bot/config.py`).
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `DISCORD_TOKEN` | yes | | Bot token. |
+| `GUILD_ID` | yes | | The server the commands are registered in. |
+| `ASSETS_URL` | yes | | Base URL of the images used by the name-of-the-day embeds. |
+| `ADMIN_USER_IDS` | no | none | Comma-separated Discord user IDs allowed to run admin commands. Empty means nobody. |
+| `DB_PATH` | no | `data/kdbot.sqlite3` | SQLite file location. |
+| `RIOT_API_KEY` | no | | Enables the `/riot` commands. Without it ranks and roles are set manually. |
+| `RIOT_DEFAULT_PLATFORM` | no | `euw1` | Platform used when `/riot link` does not specify one. |
+| `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
+| `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
+
+**Data.** Everything is in one SQLite file (plus `-wal` and `-shm` files while the bot runs). Back it
+up by copying the `data/` folder while the bot is stopped. Schema changes are versioned migrations
+in `bot/db.py` and are applied automatically; an applied migration is never edited.
+
+## Development
+
+```bash
+ruff check . && ruff format --check .   # lint and formatting
+pyright                                 # types
+pytest                                  # tests; add -m "not slow" to skip the long simulations
+```
+
+Tests need no token and no network.
+
+**Layout**
 
 ```
 bot/
-  __main__.py   entry point            config.py  .env -> Settings
-  app.py        KDBot (loads features) db.py      SQLite + migrations
+  __main__.py, app.py, config.py, db.py   entry point, bot, settings, SQLite + migrations
   features/
-    nameday/    service.py (rules, no Discord) / repository.py (SQL) / cog.py (commands) / seed/
-    admin/      /sync
-    players/    roster + role proficiency; cog.py also wires the rating services and admin.py
-    riot/       optional Riot module: client.py (HTTP, rate limit), roles.py (role experience), service.py,
-                repository.py, cog.py (/riot); plugs into the players/ratings services, never imported by them
-    simulation/ mock-player scenarios, random populations and a rating league through the real balancer
-                (`python -m bot.features.simulation list|scenario|population|league`); never loaded by the bot
-    balance/    pure team balancer (126 splits; role-dependent strength, lane matchups, star spread); no Discord/DB
-    lobby/      state machine + SQL (service.py, repository.py), render.py (messages), views.py (buttons),
-                cog.py (commands, sweeper), mock.py (test players)
-    ratings/    pure rating core (no Discord): rank.py R, matchmaking.py E, ladder.py, engine.py
-                (the only openskill import), replay.py; service.py / repository.py
-tests/
-tools/          dev-only helpers (ladder_sim.py: inspect tier and drift distributions)
+    nameday/       the original name-of-the-day feature
+    admin/         /sync
+    players/       roster, role proficiency, profile, admin rating and role commands
+    riot/          optional Riot API client, role experience, /riot commands
+    ratings/       pure rating core: rank estimate, matchmaking estimate, ladder, OpenSkill, replay
+    balance/       pure team balancer
+    lobby/         lobby state machine, messages, buttons, /lobby /match /mock commands
+    matches/       match records: results, confirmations, corrections, audit
+    simulation/    scenarios, simulated seasons and the tuning lab (not loaded by the bot)
+tests/             pytest, in-memory SQLite
+tools/             dev-only scripts
+docs/              internal documentation
 ```
 
-New features go in `bot/features/<name>/` with a `cog.py` exposing `setup(bot)`, and are added to `EXTENSIONS` in `bot/app.py`.
+Each feature keeps Discord out of its rules: `service.py` holds the logic, `repository.py` the SQL,
+`cog.py` the slash commands. A new feature goes in `bot/features/<name>/` and its `cog` module is
+added to `EXTENSIONS` in `bot/app.py`.
 
-## Data
+**Simulate the matchmaking** (no Discord needed):
 
-SQLite file at `DB_PATH` (default `data/kdbot.sqlite3`, git-ignored). Tables: `names`, `phrases`, `picks` (one row per day); Lobbies (migrations 5-7): `lobbies`, `lobby_entries`; Matches (migration 8): `matches`, `match_participants`, `match_audit`; Riot (optional, migrations 3-4): `riot_accounts`, `riot_role_games`; in-house: `players`, `player_roles`, `rating_events` and `rank_signals` (authoritative inputs) and `ratings`, `rating_history` (caches rebuilt by replay). On first run, names and phrases are loaded from `bot/features/nameday/seed/*.json`. Schema changes are versioned in `bot/db.py` (`MIGRATIONS`). To back up, copy the `data/` folder while the bot is stopped. To reset the ranking, stop the bot and delete the `.sqlite3` file (and `-wal`/`-shm` files).
-
-## Local setup
-
-1. Python 3.11+. `python -m venv .venv`, then `.venv\Scripts\activate` (Windows).
-2. `pip install -e ".[dev]"`
-3. Copy `.env.example` to `.env`; fill in `DISCORD_TOKEN` (Bot tab -> Reset Token) and `GUILD_ID`.
-   Optionally set `RIOT_API_KEY` (and `RIOT_DEFAULT_PLATFORM`, default `euw1`) to enable `/riot`; see `docs/riot-policy.md` first.
-   Lobby options: `READY_CHECK_SECONDS` (default 120) and `ENABLE_MOCK_PLAYERS` (testing only).
-   Optionally set `ADMIN_USER_IDS` (comma-separated Discord user IDs) to enable the admin commands; empty means nobody.
-4. Invite the bot with scopes `bot` + `applications.commands`. No privileged intents are needed.
-5. Run from the repo root: `python -m bot`
-
-## In-house ratings in one paragraph
-
-Three quantities per player: **R** (rank-based estimate from the main League account's Solo/Duo rank, or a self-reported/admin rank), **H** (hidden in-house rating, OpenSkill, seeded from R and changed only by confirmed in-house results) and **E** (the matchmaking estimate, `R + D*tanh((H-R)/D)`, so E can never drift more than `d_down`/`d_up` from R). H is replayed from `rating_events` plus confirmed matches, so every cache can be rebuilt (`/admin rating recompute`); E and the visible ladder are computed from stored inputs, so tuning `MatchmakingParams` or `LadderConfig` never rewrites history. Run `python tools/ladder_sim.py --help` to compare parameter sets.
-
-## Checks
-
-```
-ruff check . && ruff format --check .
-pyright
-pytest                 # -m "not slow" skips the population/league simulations (~30 s faster)
+```bash
+python -m bot.features.simulation scenario all                 # how the balancer lands fixed lobbies
+python -m bot.features.simulation season --players 14 --games 40   # a whole simulated season
+python -m bot.features.simulation tune baseline                # the tuning lab
 ```
 
-Matchmaking can be checked without Discord: `python -m bot.features.simulation season --players 14 --games 40` plays a whole season through the real lobby, match and rating services (in memory) and prints who ranked up and whether every invariant holds; and `python -m bot.features.simulation scenario all` prints how the balancer lands each scenario (five junglers, two Masters in mid, a Master among Golds, ...); `population` and `league` run many random lobbies. `tune` is the tuning lab: it plays many seasons of a realistic 20-player group (Master to Bronze, true skill deviating from the Riot rank, hidden form) under different settings, in parallel and with the same seeds for every setting, and compares estimate error, balance and tier stability: `tune baseline`, `tune sweep sigma_rank_seed 2 3 4.5`, `tune compare "a:d_up=3" "b:beta=8"`, `tune settings` (see `docs/tuning.md`). The same harness is where match-result, MMR and rank-gain checks will go.
+## Documentation
+
+The internal documentation lives in [`docs/`](docs/README.md):
+
+- [Status and hand-off](docs/status.md): what is done, what is left, agreed designs.
+- [Ratings, ranks and matchmaking](docs/matchmaking.md): how it all works in detail.
+- [Simulations](docs/simulations.md): how to test and tune without Discord.
+- [Tuning](docs/tuning.md): how the settings were chosen, with results.
+- [Testing lobbies by hand](docs/testing-lobbies.md) and [Riot policy notes](docs/riot-policy.md).
+
+## Roadmap
+
+- [x] Roster, role proficiency, hidden rating and visible in-house rank
+- [x] Optional Riot account linking, rank and ranked history
+- [x] Lobbies, ready-check, scheduled lobbies and role-aware balanced teams
+- [x] Result reporting, confirmation, corrections, ratings from games
+- [x] Simulator and tuning lab
+- [ ] Champion and KDA entry with admin validation
+- [ ] Match history, personal stats and leaderboards
+- [ ] Optional captain draft
+
+## Riot Games disclaimer
+
+Keep-Dreaming-Bot isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot
+Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and
+all associated properties are trademarks or registered trademarks of Riot Games, Inc. The in-house
+ranks are internal to the group and are not League of Legends ranks. See
+[docs/riot-policy.md](docs/riot-policy.md) for how Riot data is used.
+
+## License
+
+No license has been chosen yet, so by default all rights are reserved. Add a `LICENSE` file before
+accepting contributions.

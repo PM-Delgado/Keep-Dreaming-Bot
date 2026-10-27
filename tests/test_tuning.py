@@ -60,6 +60,7 @@ def test_overrides_reach_the_right_part_of_the_bot():
     assert options.params.sigma_rank_seed == 3.0
     assert options.engine.beta == 8.0
     assert options.ladder.placement_games == 3
+    assert isinstance(apply_overrides(SeasonOptions(), {"form_games": 10.0}).params.form_games, int)
     assert options.ladder.version == SeasonOptions().ladder.version + 1  # a changed ladder
     assert options.balance.w_lane == 0.01
     assert options.oracle is True

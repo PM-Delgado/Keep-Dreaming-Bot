@@ -19,9 +19,9 @@ class MatchmakingParams:
     # No-information seed, and the (lower) sigma of a seed that comes from a rank.
     default_mu: float = 25.0
     default_sigma: float = 25 / 3
-    sigma_rank_seed: float = 6.5
+    sigma_rank_seed: float = 2.0
     # Soft bounds on how far E may drift from the rank-based estimate R (E - R in [-d_down, d_up]).
-    d_down: float = 3.0
+    d_down: float = 2.0
     d_up: float = 4.5
     # Below this many confirmed games a rank change re-seeds H; from then on only E moves.
     reseed_below_games: int = 5
@@ -29,6 +29,12 @@ class MatchmakingParams:
     rank_stale_after_days: int = 30
     # Admin diagnostics flag a divergence when |H - R| exceeds this multiple of the bound.
     divergence_factor: float = 1.5
+    # Recent form: the average of (won - predicted win chance) over the last `form_games`
+    # confirmed games, times `form_weight` rating points, capped at +/- `form_cap`, is added to the
+    # matchmaking estimate E only (never to H or the visible tier). 0 turns it off.
+    form_games: int = 5
+    form_weight: float = 0.0
+    form_cap: float = 2.0
 
 
 @dataclass(frozen=True)

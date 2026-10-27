@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from bot.db import Database
+from bot.features.ratings.matchmaking import FormGame
 from bot.features.ratings.replay import MatchIn
 from bot.features.ratings.repository import from_db, to_db
 
@@ -266,6 +267,22 @@ class MatchRepository:
                 )
             )
         return result
+
+    async def recent_results(self, player_id: int, limit: int) -> list[FormGame]:
+        """The player's last `limit` confirmed games, oldest first, with the win chance the bot
+        predicted for their team beforehand."""
+        async with self.db.conn.execute(
+            "SELECT m.winner, p.side, m.expected_blue_win FROM match_participants p"
+            " JOIN matches m ON m.id = p.match_id"
+            " WHERE p.player_id = ? AND m.status = 'confirmed'"
+            " ORDER BY m.confirmed_at DESC, m.id DESC LIMIT ?",
+            (player_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            FormGame(winner == side, blue if side == "blue" else 1 - blue)
+            for winner, side, blue in reversed(list(rows))
+        ]
 
     async def delete_with_mock_players(self) -> int:
         """Delete every match that involves a mock player (test games leave no trace)."""

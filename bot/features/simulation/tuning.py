@@ -66,6 +66,8 @@ class SeedResult:
     placed: float
     moves: float
     problems: int
+    outcome_lopsided: float = 0.0  # like `lopsided`, counting the day's form
+    outcome_p_error: float = 0.0  # like `p_error`, against the odds that decided the game
 
 
 def apply_overrides(base: SeasonOptions, overrides: Mapping[str, float]) -> SeasonOptions:
@@ -84,7 +86,9 @@ def apply_overrides(base: SeasonOptions, overrides: Mapping[str, float]) -> Seas
             continue
         for name, (_, known) in sections.items():
             if key in known:
-                updates[name][key] = value
+                current_value = getattr(sections[name][0], key)
+                is_int = isinstance(current_value, int) and not isinstance(current_value, bool)
+                updates[name][key] = int(value) if is_int else value  # e.g. form_games=10.0
                 break
         else:
             raise ValueError(f"Unknown setting {key!r}")
@@ -150,6 +154,8 @@ async def _season(experiment: Experiment, seed: int) -> SeedResult:
         report.placed_share,
         report.tier_moves_per_player,
         len(report.problems),
+        report.outcome_lopsided_share,
+        report.mean_outcome_p_error,
     )
 
 
@@ -197,7 +203,7 @@ def run_experiments(experiments: Sequence[Experiment], workers: int | None = Non
 HEADER = (
     f"{'setting':<22}{'lopsided':>9}{'edge1-20':>9}{'edge-end':>9}{'p-err':>7}"
     f"{'E-rmse: 0':>10}{'10':>6}{'20':>6}{'40':>6}{'end':>6}{'corr':>6}"
-    f"{'tier-err':>9}{'in±1':>6}{'moves':>7}"
+    f"{'tier-err':>9}{'in±1':>6}{'moves':>7}{'w/form: lop':>12}{'p-err':>7}"
 )
 
 
@@ -210,6 +216,7 @@ def format_summaries(summaries: Sequence[Summary]) -> str:
             f"{s.mean_rmse(0):>10.2f}{s.mean_rmse(1):>6.2f}{s.mean_rmse(2):>6.2f}"
             f"{s.mean_rmse(3):>6.2f}{s.mean_rmse(4):>6.2f}{s.mean('correlation'):>6.2f}"
             f"{s.mean('tier_error'):>9.2f}{s.mean('within_one'):>6.0%}{s.mean('moves'):>7.1f}"
+            f"{s.mean('outcome_lopsided'):>12.0%}{s.mean('outcome_p_error'):>7.3f}"
             + ("" if not s.problems else f"  !! {s.problems} invariant problems")
         )
     return "\n".join(lines)
