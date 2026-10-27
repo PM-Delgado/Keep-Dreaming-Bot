@@ -25,6 +25,7 @@ from bot.features.lobby.repository import (
     ACTIVE,
     BLOCKING,
     CANCELLED,
+    COMPLETED,
     IN_PROGRESS,
     OPEN,
     READY,
@@ -37,6 +38,8 @@ from bot.features.lobby.repository import (
     OpenLobbyExists,
 )
 from bot.features.lobby.schedule import ScheduleError, parse_when
+from bot.features.matches.repository import MatchRow
+from bot.features.matches.service import MatchChange, MatchService, StandingChange
 from bot.features.players.repository import Player
 from bot.features.players.service import PlayerError, PlayerService
 from bot.features.ratings.service import RatingService
@@ -54,7 +57,7 @@ def _utcnow() -> datetime:
 class LobbyParams:
     ready_check_seconds: int = 120
     idle_hours: float = 3.0  # an unfinished lobby with no activity for this long is cancelled
-    in_progress_hours: float = 12.0  # until results exist (M3), a started game expires after this
+    legacy_started_hours: float = 12.0  # a started game without a match (pre-M3) expires after this
     reminder_minutes: int = 30  # scheduled lobbies remind their sign-ups this long before the start
     min_lead_minutes: int = 1
     max_days_ahead: int = 14
@@ -92,12 +95,15 @@ class LobbySnapshot:
     roster: list[EntryView]
     reserves: list[EntryView]
     proposal: ProposalView | None
+    match: MatchRow | None = None  # set once the teams are confirmed
+    reporter: str | None = None  # nickname of whoever reported the result
 
 
 @dataclass(frozen=True)
 class LobbyUpdate:
     snapshot: LobbySnapshot
     events: list[str] = field(default_factory=list)
+    changes: list[StandingChange] = field(default_factory=list)  # rating movements (M3)
 
 
 class LobbyService:
@@ -106,6 +112,7 @@ class LobbyService:
         repo: LobbyRepository,
         players: PlayerService,
         ratings: RatingService,
+        matches: MatchService,
         is_admin: Callable[[int], bool],
         params: LobbyParams | None = None,
         balance_params: BalanceParams | None = None,
@@ -115,6 +122,7 @@ class LobbyService:
         self.repo = repo
         self.players = players
         self.ratings = ratings
+        self.matches = matches
         self.is_admin = is_admin
         self.params = params or LobbyParams()
         self.balance_params = balance_params or BalanceParams()
@@ -244,10 +252,13 @@ class LobbyService:
             data = json.loads(lobby.proposal_json or "{}")
             if lobby.status != TEAMS_PROPOSED or not data.get("current"):
                 raise PlayerError("Não há equipas válidas para confirmar.")
-            if not await self.repo.transition(
-                lobby_id, [TEAMS_PROPOSED], IN_PROGRESS, self.clock(), ready_deadline=None
-            ):
-                raise PlayerError("Estas equipas já foram confirmadas.")
+            proposal = Proposal.from_dict(data["current"])
+            async with self.repo.db.transaction():
+                if not await self.repo.transition(
+                    lobby_id, [TEAMS_PROPOSED], IN_PROGRESS, self.clock(), ready_deadline=None
+                ):
+                    raise PlayerError("Estas equipas já foram confirmadas.")
+                await self.matches.start(lobby, proposal.blue, proposal.red, proposal.blue_win_prob)
             return LobbyUpdate(await self.snapshot(lobby_id), ["confirmed"])
 
     async def cancel(
@@ -256,7 +267,64 @@ class LobbyService:
         async with self._lock(lobby_id):
             lobby = await self._require(lobby_id)
             self._require_actor(lobby, discord_id)
+            if lobby.status == IN_PROGRESS:
+                match = await self.matches.repo.get_by_lobby(lobby_id)
+                if match is not None:
+                    change = await self.matches.void(
+                        match.id, discord_id, reason, creator_id=lobby.created_by
+                    )
+                    return LobbyUpdate(await self.snapshot(lobby_id), ["cancelled"], change.changes)
             return await self._cancel(lobby, reason)
+
+    # --- results (the game itself is a MatchService match) ----
+
+    async def report_result(self, lobby_id: int, discord_id: int, winner: str) -> LobbyUpdate:
+        return await self._match_action(
+            lobby_id, lambda match: self.matches.report(match.id, discord_id, winner)
+        )
+
+    async def confirm_result(self, lobby_id: int, discord_id: int) -> LobbyUpdate:
+        return await self._match_action(
+            lobby_id, lambda match: self.matches.confirm(match.id, discord_id)
+        )
+
+    async def contest_result(self, lobby_id: int, discord_id: int) -> LobbyUpdate:
+        return await self._match_action(
+            lobby_id, lambda match: self.matches.contest(match.id, discord_id)
+        )
+
+    async def void_match(self, match_id: int, discord_id: int, reason: str) -> LobbyUpdate:
+        match = await self._match_or_error(match_id)
+        return await self._match_action(
+            match.lobby_id, lambda m: self.matches.void(m.id, discord_id, reason)
+        )
+
+    async def fix_match(self, match_id: int, discord_id: int, winner: str) -> LobbyUpdate:
+        match = await self._match_or_error(match_id)
+        return await self._match_action(
+            match.lobby_id, lambda m: self.matches.fix(m.id, discord_id, winner)
+        )
+
+    async def process_matches(self, now: datetime | None = None) -> list[LobbyUpdate]:
+        """Auto-confirmations, result reminders and abandoned games (called by the sweeper)."""
+        return [
+            LobbyUpdate(await self.snapshot(change.match.lobby_id), change.events, change.changes)
+            for change in await self.matches.process(now)
+        ]
+
+    async def _match_or_error(self, match_id: int) -> MatchRow:
+        match = await self.matches.repo.get(match_id)
+        if match is None:
+            raise PlayerError("Esse jogo não existe.")
+        return match
+
+    async def _match_action(self, lobby_id: int, action) -> LobbyUpdate:
+        async with self._lock(lobby_id):
+            match = await self.matches.repo.get_by_lobby(lobby_id)
+            if match is None:
+                raise PlayerError("Esta lobby não tem nenhum jogo.")
+            change: MatchChange = await action(match)
+            return LobbyUpdate(await self.snapshot(lobby_id), change.events, change.changes)
 
     async def _cancel(self, lobby: LobbyRow, reason: str) -> LobbyUpdate:
         now = self.clock()
@@ -341,9 +409,8 @@ class LobbyService:
         now = now or self.clock()
         updates = []
         idle = timedelta(hours=self.params.idle_hours)
-        started = timedelta(hours=self.params.in_progress_hours)
-        for lobby in await self.repo.list_by_status(ACTIVE):
-            limit = started if lobby.status == IN_PROGRESS else idle
+        for lobby in await self.repo.list_by_status([OPEN, READY_CHECK, TEAMS_PROPOSED]):
+            limit = idle
             baseline = lobby.updated_at
             if lobby.scheduled_for is not None and lobby.status == OPEN:
                 baseline = max(baseline, lobby.scheduled_for)  # a future lobby is not idle yet
@@ -353,11 +420,21 @@ class LobbyService:
                 current = await self.repo.get(lobby.id)
                 if current is None or current.status not in ACTIVE:
                     continue
-                reason = "sem resultado" if current.status == IN_PROGRESS else "inatividade"
                 try:
-                    updates.append(await self._cancel(current, reason))
+                    updates.append(await self._cancel(current, "inatividade"))
                 except PlayerError:
                     continue
+        # Games started before matches existed (M2 lobbies) have no match to time out.
+        started = timedelta(hours=self.params.legacy_started_hours)
+        for lobby in await self.repo.list_by_status([IN_PROGRESS]):
+            if now - lobby.updated_at < started:
+                continue
+            async with self._lock(lobby.id):
+                current = await self.repo.get(lobby.id)
+                if current is None or current.status != IN_PROGRESS:
+                    continue
+                if await self.matches.repo.get_by_lobby(lobby.id) is None:
+                    updates.append(await self._cancel(current, "sem resultado"))
         return updates
 
     # --- reading ----
@@ -378,12 +455,21 @@ class LobbyService:
             if e.player_id in people
         ]
         proposal = await self._proposal_view(lobby, views)
-        return LobbySnapshot(lobby, views[:ROSTER_SIZE], views[ROSTER_SIZE:], proposal)
+        match = None
+        reporter = None
+        if lobby.status in (IN_PROGRESS, COMPLETED, CANCELLED):
+            match = await self.matches.repo.get_by_lobby(lobby_id)
+            if match is not None and match.reported_by is not None:
+                who = await self.players.repo.get_many([match.reported_by])
+                reporter = who[match.reported_by].nickname if match.reported_by in who else None
+        return LobbySnapshot(
+            lobby, views[:ROSTER_SIZE], views[ROSTER_SIZE:], proposal, match, reporter
+        )
 
     async def _proposal_view(
         self, lobby: LobbyRow, views: Sequence[EntryView]
     ) -> ProposalView | None:
-        if lobby.status not in (TEAMS_PROPOSED, IN_PROGRESS) or not lobby.proposal_json:
+        if lobby.status not in (TEAMS_PROPOSED, IN_PROGRESS, COMPLETED) or not lobby.proposal_json:
             return None
         data = json.loads(lobby.proposal_json)
         if not data.get("current"):

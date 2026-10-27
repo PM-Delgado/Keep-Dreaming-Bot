@@ -140,10 +140,50 @@ class MockPlayers:
             raise PlayerError("Não há jogadores de teste nesta lobby.")
         return update
 
+    async def report(self, lobby_id: int, winner: str) -> LobbyUpdate:
+        """A mock player in the game reports the result (so you can try confirm/contest)."""
+        self._require_enabled()
+        snapshot = await self.lobbies.snapshot(lobby_id)
+        mock = next((e for e in snapshot.roster if e.is_mock), None)
+        if mock is None:
+            raise PlayerError("Não há jogadores de teste neste jogo.")
+        return await self.lobbies.report_result(lobby_id, mock.discord_id, winner)
+
+    async def confirm(self, lobby_id: int) -> LobbyUpdate:
+        """A mock player on the team opposite to the reporter confirms the reported result."""
+        self._require_enabled()
+        snapshot = await self.lobbies.snapshot(lobby_id)
+        match = snapshot.match
+        if match is None or match.status != "reported":
+            raise PlayerError("Não há resultado por confirmar.")
+        people = await self.lobbies.matches.repo.participants(match.id)
+        reporter_side = next((p.side for p in people if p.player_id == match.reported_by), None)
+        mocks = {e.player_id: e.discord_id for e in snapshot.roster if e.is_mock}
+        confirmer = next(
+            (
+                mocks[p.player_id]
+                for p in people
+                if p.player_id in mocks and p.side != reporter_side
+            ),
+            None,
+        )
+        if confirmer is None:
+            raise PlayerError("Não há nenhum jogador de teste na outra equipa.")
+        return await self.lobbies.confirm_result(lobby_id, confirmer)
+
     async def clear(self) -> int:
-        """Delete all mock players. Refused while any of them is in an unfinished lobby."""
+        """Delete all mock players. Refused while any of them is in an unfinished lobby.
+
+        Finished test games that involved a mock are deleted too, and the ratings are rebuilt, so
+        test games leave no trace in real players' ratings.
+        """
         self._require_enabled()
         for player in await self.players.repo.list_mock():
             if await self.lobbies.repo.active_lobby_of(player.id) is not None:
                 raise PlayerError("Há jogadores de teste em lobbies ativas. Cancela-as primeiro.")
-        return await self.players.repo.delete_mock_players()
+        async with self.lobbies.repo.db.transaction():
+            games = await self.lobbies.matches.repo.delete_with_mock_players()
+            count = await self.players.repo.delete_mock_players()
+            if games:
+                await self.ratings.rebuild()
+        return count

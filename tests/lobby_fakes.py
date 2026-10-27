@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 from bot.db import Database
 from bot.features.lobby.repository import LobbyRepository
 from bot.features.lobby.service import LobbyParams, LobbyService, LobbyUpdate
+from bot.features.matches.repository import MatchRepository
+from bot.features.matches.service import MatchParams, MatchService
 from bot.features.players.repository import PlayerRepository
 from bot.features.players.service import PlayerService
 from bot.features.ratings.repository import RatingRepository
@@ -37,13 +39,28 @@ class LobbyStack:
         self.ratings = RatingService(RatingRepository(db), clock=self.clock)
         self.players = PlayerService(PlayerRepository(db), self.ratings, clock=self.clock)
         self.repo = LobbyRepository(db)
+        self.match_repo = MatchRepository(db)
+        self.ratings.matches_source = self.match_repo.confirmed_for_replay
+        self.matches = MatchService(
+            self.match_repo,
+            self.repo,
+            self.players,
+            self.ratings,
+            lambda user_id: user_id == ADMIN,
+            db,
+            clock=self.clock,
+        )
         self.lobbies = self.make_service(seed)
+
+    def with_match_params(self, params: MatchParams) -> None:
+        self.matches.params = params
 
     def make_service(self, seed: int = 1, params: LobbyParams | None = None) -> LobbyService:
         return LobbyService(
             self.repo,
             self.players,
             self.ratings,
+            self.matches,
             is_admin=lambda user_id: user_id == ADMIN,
             params=params,
             clock=self.clock,
@@ -72,3 +89,19 @@ class LobbyStack:
             update = await self.lobbies.ready(lobby_id, i)
         assert update is not None
         return update
+
+
+async def start_game(stack: LobbyStack, size: int = 10, creator: int = 1):
+    """Run a lobby up to confirmed teams; returns (lobby id, match row). Players are 1..size."""
+    update = await stack.full_lobby(size, creator)
+    lobby_id = update.snapshot.lobby.id
+    await stack.ready_everyone(lobby_id, list(range(1, size + 1)))
+    await stack.lobbies.confirm(lobby_id, creator)
+    match = await stack.match_repo.get_by_lobby(lobby_id)
+    assert match is not None
+    return lobby_id, match
+
+
+async def sides_of(stack: LobbyStack, match_id: int) -> dict[str, list[int]]:
+    people = await stack.match_repo.participants(match_id)
+    return {s: [p.player_id for p in people if p.side == s] for s in ("blue", "red")}

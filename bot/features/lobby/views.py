@@ -18,6 +18,7 @@ from bot.features.lobby.repository import (
 
 if TYPE_CHECKING:
     from bot.features.lobby.cog import Lobby
+    from bot.features.lobby.service import LobbySnapshot
 
 # action -> (label, style)
 ACTIONS: dict[str, tuple[str, discord.ButtonStyle]] = {
@@ -27,14 +28,30 @@ ACTIONS: dict[str, tuple[str, discord.ButtonStyle]] = {
     "decline": ("Recusar", discord.ButtonStyle.danger),
     "confirm": ("Confirmar", discord.ButtonStyle.success),
     "cancel": ("Cancelar", discord.ButtonStyle.danger),
+    "report_blue": ("Azul ganhou", discord.ButtonStyle.primary),
+    "report_red": ("Vermelho ganhou", discord.ButtonStyle.danger),
+    "confirm_result": ("Confirmar resultado", discord.ButtonStyle.success),
+    "contest": ("Contestar", discord.ButtonStyle.secondary),
 }
+# A started game has sub-states that depend on its match, not only on the lobby status.
+REPORTED, CONTESTED = "REPORTED", "CONTESTED"
 # Which buttons each state shows.
 VISIBLE: dict[str, tuple[str, ...]] = {
     OPEN: ("join", "leave", "cancel"),
     READY_CHECK: ("ready", "decline", "join", "cancel"),
     TEAMS_PROPOSED: ("confirm", "leave", "cancel"),
-    IN_PROGRESS: ("cancel",),
+    IN_PROGRESS: ("report_blue", "report_red", "cancel"),
+    REPORTED: ("confirm_result", "contest", "report_blue", "report_red", "cancel"),
+    CONTESTED: ("report_blue", "report_red", "confirm_result", "cancel"),
 }
+
+
+def state_of(snapshot: "LobbySnapshot") -> str:
+    """The key into VISIBLE for a lobby: its status, refined by its match once started."""
+    match = snapshot.match
+    if snapshot.lobby.status == IN_PROGRESS and match is not None and match.status == "reported":
+        return CONTESTED if match.contested else REPORTED
+    return snapshot.lobby.status
 
 
 class ActionButton(discord.ui.Button["LobbyView"]):

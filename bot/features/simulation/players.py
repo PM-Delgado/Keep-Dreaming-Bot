@@ -22,6 +22,7 @@ class SimPlayer:
     sigma: float
     true_mu: float  # hidden true strength
     proficiency: Mapping[str, int | None] = field(default_factory=dict)  # role -> 1..5 | None
+    rank: tuple[str, str | None] | None = None  # Riot (tier, division), when the bot knows one
 
     def to_input(self) -> PlayerInput:
         return PlayerInput(self.player_id, self.mu, self.sigma, dict(self.proficiency))

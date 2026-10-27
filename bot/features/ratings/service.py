@@ -23,12 +23,16 @@ from bot.features.ratings.rank import (
     rank_points,
     resolve_rank,
 )
-from bot.features.ratings.replay import replay
+from bot.features.ratings.replay import MatchIn, replay
 from bot.features.ratings.repository import RatingRepository, StoredRating
 
 
 class RatingError(ValueError):
     """A user-facing problem (message is shown to the user)."""
+
+
+async def _no_matches() -> list[MatchIn]:
+    return []
 
 
 async def _no_main(player_id: int) -> str | None:
@@ -65,6 +69,7 @@ class RatingService:
         self.ladder = ladder
         self.clock = clock
         self.main_puuid_of = main_puuid_of  # M1b injects the designated main account's puuid
+        self.matches_source: Callable[[], Awaitable[list[MatchIn]]] = _no_matches  # set by M3
         self.algo_version = algo_version(self.engine.params)
         self._rebuild_lock = asyncio.Lock()
 
@@ -74,7 +79,7 @@ class RatingService:
         """Replay every authoritative input and rewrite the caches."""
         async with self._rebuild_lock:
             events = await self.repo.list_events()
-            result = replay(events, [], self.engine, self.ladder)
+            result = replay(events, await self.matches_source(), self.engine, self.ladder)
             await self.repo.replace_caches(
                 result, self.algo_version, self.ladder.version, self.clock()
             )

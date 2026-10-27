@@ -329,3 +329,28 @@ def test_cli_population_and_league(capsys):
     out = capsys.readouterr().out
     assert "rank correlation" in out
     assert "(colocação)" in out
+
+
+def test_the_league_updates_ratings_exactly_like_the_replay_the_bot_uses_after_confirmations():
+    """The simulated ratings are the bot's ratings: replaying the same matches reproduces them."""
+    from datetime import UTC, datetime, timedelta
+
+    from bot.features.ratings.replay import MatchIn, RatingEventIn, replay
+
+    league = League(random_roster(random.Random(11), 10), seed=11)
+    start = {pid: (p.h.mu, p.h.sigma) for pid, p in league.players.items()}
+    for _ in range(4):
+        league.play_lobby()
+    origin = datetime(2026, 1, 1, tzinfo=UTC)
+    events = [
+        RatingEventIn(i, pid, "seed", mu, sigma, origin)
+        for i, (pid, (mu, sigma)) in enumerate(sorted(start.items()), start=1)
+    ]
+    matches = [
+        MatchIn(r.index + 1, origin + timedelta(hours=r.index + 1), r.winner, r.blue_ids, r.red_ids)
+        for r in league.records
+    ]
+    replayed = replay(events, matches)
+    for pid, player in league.players.items():
+        assert replayed.players[pid].mu == pytest.approx(player.h.mu)
+        assert replayed.players[pid].games == player.games

@@ -164,6 +164,16 @@ class LobbyRepository:
             row = await cur.fetchone()
         return _lobby(row) if row else None
 
+    async def started_for_guild(self, guild_id: int) -> LobbyRow | None:
+        """The most recent game in progress (waiting for its result) on the server."""
+        async with self.db.conn.execute(
+            f"SELECT {_COLUMNS} FROM lobbies WHERE guild_id = ? AND status = 'IN_PROGRESS'"
+            " ORDER BY id DESC LIMIT 1",
+            (guild_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return _lobby(row) if row else None
+
     async def list_scheduled(self, guild_id: int) -> list[LobbyRow]:
         """Scheduled lobbies still waiting for their time (or for enough players), soonest first."""
         async with self.db.conn.execute(

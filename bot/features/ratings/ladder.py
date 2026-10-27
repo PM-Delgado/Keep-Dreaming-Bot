@@ -96,6 +96,11 @@ def _step_index(ladder: LadderConfig, standing: Standing | None) -> int | None:
     return None  # previous tier/division no longer exists in this ladder version
 
 
+def step_rank(ladder: LadderConfig, tier_key: str | None, division: int | None) -> int | None:
+    """Position of a stored tier/division on the ladder (higher = better), None if unknown."""
+    return _step_index(ladder, Standing(0, True, tier_key, division))
+
+
 def step_progress(
     ladder: LadderConfig, tier_key: str | None, division: int | None, mu: float
 ) -> float | None:
