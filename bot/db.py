@@ -1,9 +1,15 @@
 """SQLite connection wrapper with a tiny versioned-migration scheme."""
 
+import asyncio
 import logging
+import sqlite3
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import aiosqlite
+from aiosqlite.context import contextmanager
 
 log = logging.getLogger(__name__)
 
@@ -198,24 +204,182 @@ MIGRATIONS: list[str] = [
     ALTER TABLE lobbies ADD COLUMN reminder_stage INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE lobbies ADD COLUMN note TEXT;
     """,
+    # 8: matches (M3a). A match is created when a lobby's teams are confirmed. The result is
+    # reported by a participant and confirmed by someone on the other team (or an admin, or
+    # automatically after a quiet period); only confirmed matches feed the ratings. `h_*`/`est_*`/
+    # `rank_mu` freeze what the balancer saw, for explainability only (never inputs to replay).
+    """
+    CREATE TABLE matches (
+        id                INTEGER PRIMARY KEY,
+        lobby_id          INTEGER NOT NULL UNIQUE REFERENCES lobbies(id),
+        guild_id          INTEGER NOT NULL,
+        status            TEXT NOT NULL CHECK (status IN
+                          ('in_progress', 'reported', 'confirmed', 'voided')),
+        winner            TEXT CHECK (winner IN ('blue', 'red')),
+        expected_blue_win REAL NOT NULL,
+        created_at        TEXT NOT NULL,
+        reported_by       INTEGER REFERENCES players(id),
+        reported_at       TEXT,
+        confirmed_by      INTEGER REFERENCES players(id),  -- NULL when confirmed automatically
+        confirmed_at      TEXT,
+        auto_confirmed    INTEGER NOT NULL DEFAULT 0,
+        contested         INTEGER NOT NULL DEFAULT 0,
+        voided_by         INTEGER REFERENCES players(id),
+        voided_at         TEXT,
+        void_reason       TEXT,
+        reminder_sent     INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX matches_by_status ON matches(status);
+    CREATE TABLE match_participants (
+        match_id     INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+        player_id    INTEGER NOT NULL REFERENCES players(id),
+        side         TEXT NOT NULL CHECK (side IN ('blue', 'red')),
+        role         TEXT NOT NULL CHECK (role IN ('TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT')),
+        h_mu_before  REAL NOT NULL,
+        h_sigma_before REAL NOT NULL,
+        est_mu       REAL NOT NULL,
+        est_sigma    REAL NOT NULL,
+        rank_mu      REAL,
+        PRIMARY KEY (match_id, player_id),
+        UNIQUE (match_id, side, role)
+    );
+    CREATE INDEX match_participants_by_player ON match_participants(player_id);
+    CREATE TABLE match_audit (
+        id         INTEGER PRIMARY KEY,
+        match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+        action     TEXT NOT NULL CHECK (action IN
+                   ('report', 'confirm', 'auto_confirm', 'contest', 'set_winner', 'void')),
+        actor_id   INTEGER,  -- Discord user ID; NULL for the bot itself
+        old_value  TEXT,
+        new_value  TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
 ]
+
+_OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)
+
+
+class _Connection(aiosqlite.Connection):
+    """The one shared connection, made safe for multi-statement transactions.
+
+    Everything else in the bot writes with single statements followed by `commit()`. A transaction
+    spanning several statements would normally be torn apart by those commits (and by their
+    statements being swept into a rollback), because all coroutines share this connection. So while
+    a `transaction()` is open every other task's statement waits for it to finish, and the owning
+    task's own `commit()`/`rollback()` calls are deferred to the end of the transaction. That lets
+    the existing repository methods run unchanged inside one atomic transaction.
+
+    Keep transaction bodies to database work: awaiting something that itself needs the database
+    from another task would deadlock.
+    """
+
+    def __init__(self, connector: Callable[[], sqlite3.Connection], iter_chunk_size: int) -> None:
+        super().__init__(connector, iter_chunk_size)
+        self._tx_lock = asyncio.Lock()
+        self._quiet = asyncio.Event()  # set while no transaction holds back other tasks
+        self._quiet.set()
+        self._draining = False  # a transaction is starting; stragglers may still commit
+        self._owner: object | None = None
+
+    def _owns(self) -> bool:
+        return self._owner is not None and _OWNER.get() is self._owner
+
+    async def _gate(self, finishing: bool = False) -> None:
+        if not self._owns() and not (finishing and self._draining):
+            await self._quiet.wait()
+
+    @contextmanager
+    async def execute(self, sql, parameters=None):  # type: ignore[override]
+        await self._gate()
+        return await super().execute(sql, parameters)
+
+    @contextmanager
+    async def executemany(self, sql, parameters):  # type: ignore[override]
+        await self._gate()
+        return await super().executemany(sql, parameters)
+
+    @contextmanager
+    async def executescript(self, sql_script):  # type: ignore[override]
+        await self._gate()
+        return await super().executescript(sql_script)
+
+    async def commit(self) -> None:
+        if self._owns():
+            return  # the transaction commits as a whole when it ends
+        await self._gate(finishing=True)
+        await super().commit()
+
+    async def rollback(self) -> None:
+        if self._owns():
+            return  # the failing statement was already undone; the transaction rolls back at exit
+        await self._gate(finishing=True)
+        await super().rollback()
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        """All-or-nothing: everything written inside is committed together or not at all."""
+        if self._owns():
+            yield  # nested use joins the outer transaction
+            return
+        async with self._tx_lock:
+            self._draining = True
+            self._quiet.clear()
+            try:
+                await self._wait_for_others()
+                await super().execute("BEGIN IMMEDIATE")
+                owner = object()
+                self._owner = owner
+                self._draining = False
+                token = _OWNER.set(owner)
+                try:
+                    yield
+                except BaseException:
+                    await super().rollback()
+                    raise
+                else:
+                    await super().commit()
+                finally:
+                    _OWNER.reset(token)
+            finally:
+                self._owner = None
+                self._draining = False
+                self._quiet.set()
+
+    async def _wait_for_others(self) -> None:
+        # Statements queued before the gate closed still run first; let their own implicit
+        # transactions finish (they may commit) before starting ours.
+        async with super().execute("SELECT 1") as cur:
+            await cur.fetchall()
+        for _ in range(1000):
+            if not self.in_transaction:
+                return
+            await asyncio.sleep(0.001)
+        log.warning("Committing a write that was left uncommitted before a transaction.")
+        await super().commit()
 
 
 class Database:
     def __init__(self, path: Path | str) -> None:
         self.path = str(path)
-        self._conn: aiosqlite.Connection | None = None
+        self._conn: _Connection | None = None
 
     @property
-    def conn(self) -> aiosqlite.Connection:
+    def conn(self) -> _Connection:
         if self._conn is None:
             raise RuntimeError("Database is not connected.")
         return self._conn
 
+    def transaction(self) -> AbstractAsyncContextManager[None]:
+        """`async with db.transaction():` makes the writes inside atomic (see `_Connection`)."""
+        return self.conn.transaction()
+
     async def connect(self) -> None:
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        conn = await aiosqlite.connect(self.path)
+        path = self.path
+        conn = _Connection(lambda: sqlite3.connect(path), 64)
+        await conn
         await conn.execute("PRAGMA foreign_keys = ON")
         if self.path != ":memory:":
             await conn.execute("PRAGMA journal_mode = WAL")

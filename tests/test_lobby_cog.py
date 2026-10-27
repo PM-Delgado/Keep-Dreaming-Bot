@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 import pytest_asyncio
-from lobby_fakes import ADMIN, CHANNEL, GUILD, LobbyStack
+from lobby_fakes import ADMIN, CHANNEL, GUILD, LobbyStack, sides_of, start_game
 
 from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
@@ -17,6 +17,7 @@ from bot.features.lobby.render import (
     build_lobby_embed,
     fit_note,
     ready_check_ping,
+    result_summary,
     scheduled_ping,
     team_text,
 )
@@ -246,16 +247,40 @@ async def test_a_full_game_through_the_buttons_and_mock_players(env):
     await env.cog.on_action(ix, "confirm")  # type: ignore[arg-type]
     final = ix.edited[0]
     assert "Em jogo" in text_of(final["embed"])
-    assert [b.custom_id for b in final["view"].children] == ["lobby:cancel"]
+    assert [b.custom_id for b in final["view"].children] == [
+        "lobby:report_blue",
+        "lobby:report_red",
+        "lobby:cancel",
+    ]
 
 
 async def test_the_buttons_shown_depend_on_the_state(env):
-    assert set(VISIBLE) == {"OPEN", "READY_CHECK", "TEAMS_PROPOSED", "IN_PROGRESS"}
+    assert set(VISIBLE) == {
+        "OPEN",
+        "READY_CHECK",
+        "TEAMS_PROPOSED",
+        "IN_PROGRESS",
+        "REPORTED",
+        "CONTESTED",
+    }
     expected = {
         "OPEN": ["lobby:join", "lobby:leave", "lobby:cancel"],
         "READY_CHECK": ["lobby:ready", "lobby:decline", "lobby:join", "lobby:cancel"],
         "TEAMS_PROPOSED": ["lobby:confirm", "lobby:leave", "lobby:cancel"],
-        "IN_PROGRESS": ["lobby:cancel"],
+        "IN_PROGRESS": ["lobby:report_blue", "lobby:report_red", "lobby:cancel"],
+        "REPORTED": [
+            "lobby:confirm_result",
+            "lobby:contest",
+            "lobby:report_blue",
+            "lobby:report_red",
+            "lobby:cancel",
+        ],
+        "CONTESTED": [
+            "lobby:report_blue",
+            "lobby:report_red",
+            "lobby:confirm_result",
+            "lobby:cancel",
+        ],
     }
     for status, ids in expected.items():
         view = LobbyView(env.cog, status)
@@ -576,6 +601,206 @@ def test_scheduled_ping_is_none_without_real_players():
     assert scheduled_ping(SimpleNamespace(lobby=lobby, roster=[], reserves=[]), "reminder") is None  # type: ignore[arg-type]
 
 
+# --- results: buttons, pings, summaries, /match, mock helpers ----
+
+
+async def started_game(env) -> tuple[int, dict[str, list[int]]]:
+    """Ten real players (1..10) with confirmed teams; the lobby message is message 777."""
+    lobby_id, match = await start_game(env.stack)
+    await env.stack.lobbies.attach_message(lobby_id, 777, CHANNEL)
+    return lobby_id, await sides_of(env.stack, match.id)
+
+
+def button_ids(interaction: FakeInteraction) -> list[str]:
+    return [b.custom_id for b in interaction.edited[-1]["view"].children]
+
+
+async def test_reporting_through_the_buttons_asks_the_other_team_to_confirm(env):
+    lobby_id, sides = await started_game(env)
+    ix = FakeInteraction(sides["blue"][0], 777)
+    await env.cog.on_action(ix, "report_blue")  # type: ignore[arg-type]
+    text = text_of(ix.edited[0]["embed"])
+    assert "reportou" in text
+    assert "Azul ganhou" in text
+    assert button_ids(ix)[:2] == ["lobby:confirm_result", "lobby:contest"]
+    [ping] = env.channel.sent
+    for pid in sides["red"]:
+        assert f"<@{pid}>" in ping["content"]
+    assert not any(f"<@{pid}>" in ping["content"] for pid in sides["blue"])
+    assert "Confirmem" in ping["content"]
+
+
+async def test_the_other_team_confirms_and_the_summary_shows_placement_progress(env):
+    lobby_id, sides = await started_game(env)
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+    env.channel.sent.clear()
+    ix = FakeInteraction(sides["red"][0], 777)
+    await env.cog.on_action(ix, "confirm_result")  # type: ignore[arg-type]
+    embed_text = text_of(ix.edited[0]["embed"])
+    assert "Terminada" in embed_text
+    assert "Azul ganhou" in embed_text
+    assert ix.edited[0]["view"] is None  # no buttons on a finished game
+    [summary] = env.channel.sent
+    assert "Azul ganhou" in summary["content"]
+    assert "Em colocação" in summary["content"]  # nobody has a tier yet
+    assert "1/5" in summary["content"]
+    for hidden in ("mu", "sigma", "rating"):
+        assert hidden not in summary["content"].lower()
+
+
+async def test_strangers_and_the_reporting_team_get_a_clear_refusal(env):
+    lobby_id, sides = await started_game(env)
+    await env.stack.register(1, start=60)
+    ix = FakeInteraction(60, 777)
+    await env.cog.on_action(ix, "report_blue")  # type: ignore[arg-type]
+    assert "quem jogou" in ix.sent[0]["content"]
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+    ix = FakeInteraction(sides["blue"][1], 777)
+    await env.cog.on_action(ix, "confirm_result")  # type: ignore[arg-type]
+    assert "outra equipa" in ix.sent[0]["content"]
+    assert ix.edited == []
+
+
+async def test_contesting_changes_the_message_and_the_buttons(env):
+    lobby_id, sides = await started_game(env)
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+    ix = FakeInteraction(sides["red"][0], 777)
+    await env.cog.on_action(ix, "contest")  # type: ignore[arg-type]
+    assert "contestado" in text_of(ix.edited[0]["embed"])
+    assert "lobby:contest" not in button_ids(ix)
+    assert "lobby:confirm_result" in button_ids(ix)
+
+
+async def test_the_sweeper_auto_confirms_refreshes_the_message_and_posts_the_summary(env):
+    lobby_id, sides = await started_game(env)
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_red")  # type: ignore[arg-type]
+    env.channel.sent.clear()
+    env.stack.clock.advance(minutes=31)
+    await env.cog.sweeper.coro(env.cog)
+    edit = env.channel.messages[777].edits[-1]
+    assert "confirmado automaticamente" in text_of(edit["embed"])
+    [summary] = env.channel.sent
+    assert "Vermelho ganhou" in summary["content"]
+    assert "automaticamente" in summary["content"]
+
+
+async def test_the_sweeper_nudges_unreported_games_once(env):
+    await started_game(env)
+    env.stack.clock.advance(minutes=91)
+    await env.cog.sweeper.coro(env.cog)
+    await env.cog.sweeper.coro(env.cog)
+    [ping] = env.channel.sent
+    assert "ainda não tem resultado" in ping["content"]
+    assert all(f"<@{pid}>" in ping["content"] for pid in range(1, 11))
+
+
+async def test_a_promotion_is_announced_once_placement_is_done(env):
+    await env.stack.register(1, start=ADMIN)
+    last = None
+    for game in range(5):
+        lobby_id, match = await start_game(env.stack)
+        await env.stack.lobbies.attach_message(lobby_id, 700 + game, CHANNEL)
+        last = await env.stack.lobbies.report_result(lobby_id, ADMIN, "blue")
+    assert last is not None
+    names = {
+        p.id: p.nickname
+        for p in (await env.stack.players.repo.get_many(list(range(1, 11)))).values()
+    }
+    summary = result_summary(
+        last.snapshot, last.events, last.changes, names, env.stack.ratings.ladder
+    )
+    assert summary is not None
+    assert summary.count("terminou a colocação") == 10
+    assert "Em colocação" not in summary
+    for hidden in ("mu", "sigma"):
+        assert hidden not in summary.lower().replace("muito", "")
+
+
+async def test_match_show_lists_teams_and_history(env):
+    lobby_id, sides = await started_game(env)
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, None)  # type: ignore[arg-type]
+    text = text_of(ix.sent[0]["embed"])
+    assert "Resultado por confirmar" in text
+    assert "Vencedor: **Azul**" in text
+    assert "Player 01" in text
+    assert "reportou" in text
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, 999)  # type: ignore[arg-type]
+    assert "Não encontrei" in ix.sent[0]["content"]
+
+
+async def test_match_fix_and_void_are_for_admins_and_update_the_message(env):
+    lobby_id, sides = await started_game(env)
+    await env.stack.register(1, start=ADMIN)
+    await env.cog.on_action(FakeInteraction(ADMIN, 777), "report_blue")  # type: ignore[arg-type]
+    match = await env.stack.match_repo.get_by_lobby(lobby_id)
+    assert match is not None
+    env.channel.sent.clear()
+    blue = SimpleNamespace(value="red")
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_fix.callback(env.cog, ix, match.id, blue)  # type: ignore[arg-type]
+    assert ix.sent[0]["content"] == "Feito."
+    assert "Vermelho ganhou" in text_of(env.channel.messages[777].edits[-1]["embed"])
+    assert "corrigido" in env.channel.sent[0]["content"]
+    ix = FakeInteraction(ADMIN)
+    await env.cog.match_void.callback(env.cog, ix, match.id, "erro de registo")  # type: ignore[arg-type]
+    assert "Lobby encerrada (erro de registo)" in text_of(
+        env.channel.messages[777].edits[-1]["embed"]
+    )
+    assert "anulada" in env.channel.sent[-1]["content"]
+    ix = FakeInteraction(1)
+    await env.cog.match_void.callback(env.cog, ix, match.id, "x")  # type: ignore[arg-type]
+    assert "admin" in ix.sent[0]["content"] or "anulado" in ix.sent[0]["content"]
+
+
+async def test_mock_players_can_report_and_confirm_so_one_account_can_test_the_flow(env):
+    lobby_id, _ = await open_as(env)
+    await env.mock.fill(lobby_id, 9, ADMIN)
+    await env.mock.ready_all(lobby_id)
+    await env.stack.lobbies.ready(lobby_id, 1)
+    await env.stack.lobbies.confirm(lobby_id, 1)
+
+    ix = FakeInteraction(ADMIN)
+    await env.cog.mock_report.callback(env.cog, ix, SimpleNamespace(value="blue"))  # type: ignore[arg-type]
+    assert "reportado" in ix.sent[0]["content"]
+    assert "reportou" in text_of(env.channel.messages[777].edits[-1]["embed"])
+    ix = FakeInteraction(ADMIN)
+    await env.cog.mock_confirm.callback(env.cog, ix)  # type: ignore[arg-type]
+    assert "confirmado" in ix.sent[0]["content"]
+    assert "Terminada" in text_of(env.channel.messages[777].edits[-1]["embed"])
+    stored = await env.stack.ratings.repo.get_stored(1)
+    assert stored is not None
+    assert stored.games == 1
+
+
+async def test_clearing_mock_players_removes_their_games_from_real_ratings(env):
+    lobby_id, _ = await open_as(env)
+    await env.mock.fill(lobby_id, 9, ADMIN)
+    await env.mock.ready_all(lobby_id)
+    await env.stack.lobbies.ready(lobby_id, 1)
+    await env.stack.lobbies.confirm(lobby_id, 1)
+    await env.mock.report(lobby_id, "blue")
+    await env.mock.confirm(lobby_id)
+    before = await env.stack.ratings.repo.get_stored(1)
+    assert before is not None
+    assert before.games == 1
+    removed = await env.mock.clear()
+    assert removed == 9
+    after = await env.stack.ratings.repo.get_stored(1)
+    assert after is not None
+    assert after.games == 0
+    assert await env.stack.match_repo.get_by_lobby(lobby_id) is None
+
+
+async def test_mock_report_needs_a_started_game(env):
+    lobby_id, _ = await open_as(env)
+    ix = FakeInteraction(ADMIN)
+    await env.cog.mock_report.callback(env.cog, ix, SimpleNamespace(value="blue"))  # type: ignore[arg-type]
+    assert "Não" in ix.sent[0]["content"]
+
+
 # --- extension wiring ----
 
 
@@ -599,6 +824,8 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
             "show",
             "cancel",
         }
+        match_commands: Any = top["match"]
+        assert {c.name for c in match_commands.commands} == {"show", "void", "fix"}
         assert {c.name for c in mock_commands.commands} == {
             "create",
             "fill",
@@ -606,6 +833,8 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
             "drop",
             "list",
             "clear",
+            "report",
+            "confirm",
         }
         for command in mock_commands.commands:  # every mock command is allowlist-gated
             assert any(check.__name__ == "_admin_predicate" for check in command.checks)

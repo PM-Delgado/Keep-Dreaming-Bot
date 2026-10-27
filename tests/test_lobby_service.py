@@ -459,9 +459,10 @@ async def test_a_started_game_without_a_result_eventually_expires(stack):
     lobby_id = await proposed(stack)
     await stack.lobbies.confirm(lobby_id, 1)
     stack.clock.advance(hours=11)
-    assert await stack.lobbies.expire_idle() == []
+    assert not [u for u in await stack.lobbies.process_matches() if "voided" in u.events]
     stack.clock.advance(hours=1.5)
-    [expired] = await stack.lobbies.expire_idle()
+    [expired] = [u for u in await stack.lobbies.process_matches() if "voided" in u.events]
+    assert expired.snapshot.lobby.status == "CANCELLED"
     assert expired.snapshot.lobby.cancel_reason == "sem resultado"
 
 

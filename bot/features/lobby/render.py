@@ -1,6 +1,9 @@
 """Lobby messages (embeds and text). All wording and layout live here so the look can be
 reworked later without touching lobby rules. Never shows ratings, only the coarse balance band."""
 
+from collections.abc import Mapping, Sequence
+from datetime import timedelta
+
 import discord
 
 from bot.features.balance.model import BAND_CLEAR, BAND_EVEN, BAND_LOPSIDED, BAND_SLIGHT
@@ -14,7 +17,10 @@ from bot.features.lobby.repository import (
     TEAMS_PROPOSED,
 )
 from bot.features.lobby.service import EntryView, LobbySnapshot, ProposalView, SlotView
+from bot.features.matches.repository import AuditRow, MatchRow
+from bot.features.matches.service import StandingChange
 from bot.features.players.proficiency import ROLE_NAMES_PT
+from bot.features.ratings.ladder import LadderConfig, step_rank
 
 STATUS_TEXT = {
     OPEN: "Aberta",
@@ -82,7 +88,7 @@ def team_text(slots: list[SlotView]) -> str:
     )
 
 
-def build_lobby_embed(snapshot: LobbySnapshot) -> discord.Embed:
+def build_lobby_embed(snapshot: LobbySnapshot, auto_confirm_minutes: int = 30) -> discord.Embed:
     lobby = snapshot.lobby
     status = lobby.status
     scheduled_open = lobby.kind == "scheduled" and status == OPEN
@@ -119,13 +125,15 @@ def build_lobby_embed(snapshot: LobbySnapshot) -> discord.Embed:
             "é substituído pelas reservas."
         )
 
-    if status in (TEAMS_PROPOSED, IN_PROGRESS):
+    if status in (TEAMS_PROPOSED, IN_PROGRESS, COMPLETED):
         _add_teams(embed, snapshot)
+    if status in (IN_PROGRESS, COMPLETED):
+        _describe_game(embed, snapshot, auto_confirm_minutes)
 
     if status == CANCELLED:
         embed.description = f"Lobby encerrada ({lobby.cancel_reason or 'cancelada'})."
     elif status == IN_PROGRESS:
-        embed.set_footer(text="Boa sorte! O registo do resultado chega numa próxima versão.")
+        embed.set_footer(text="Só o resultado confirmado conta para o rank.")
     elif status == TEAMS_PROPOSED:
         embed.set_footer(text="Só o criador ou um admin confirma ou cancela. N/5 = nível na role.")
     return embed
@@ -139,6 +147,173 @@ def _add_teams(embed: discord.Embed, snapshot: LobbySnapshot) -> None:
     embed.add_field(name=f"{SIDE_EMOJI['blue']} Azul", value=team_text(proposal.blue))
     embed.add_field(name=f"{SIDE_EMOJI['red']} Vermelho", value=team_text(proposal.red))
     embed.add_field(name="Equilíbrio", value=band_text(proposal), inline=False)
+
+
+def _describe_game(embed: discord.Embed, snapshot: LobbySnapshot, auto_minutes: int) -> None:
+    """The line under the title of a started game: playing, waiting for a confirmation, or done."""
+    match = snapshot.match
+    if match is None:
+        return
+    winner = SIDE_NAME.get(match.winner or "", "?")
+    if match.status == "confirmed":
+        how = " (confirmado automaticamente)" if match.auto_confirmed else ""
+        embed.description = f"🏆 **{winner} ganhou**{how}."
+    elif match.status == "reported" and match.reported_at is not None:
+        who = discord.utils.escape_markdown(snapshot.reporter or "?")
+        if match.contested:
+            embed.description = (
+                f"**{who}** reportou que o **{winner}** ganhou, mas o resultado foi contestado. "
+                "Um admin tem de decidir (botões da equipa vencedora)."
+            )
+        else:
+            stamp = int((match.reported_at + timedelta(minutes=auto_minutes)).timestamp())
+            embed.description = (
+                f"**{who}** reportou: **{winner} ganhou**. Alguém da outra equipa confirma, ou "
+                f"contesta se não é verdade; sem objeções confirma <t:{stamp}:R>."
+            )
+    elif match.status == "in_progress":
+        embed.description = (
+            "Jogo em curso. Quando acabar, alguém carrega no botão da equipa vencedora."
+        )
+
+
+def report_ping(snapshot: LobbySnapshot) -> tuple[str, list[EntryView]] | None:
+    """Ask the team that did not report to confirm (real players only)."""
+    match, proposal = snapshot.match, snapshot.proposal
+    if match is None or proposal is None or match.winner is None:
+        return None
+    blue_ids = {s.player_id for s in proposal.blue}
+    reporter_blue = match.reported_by in blue_ids
+    other = {s.player_id for s in (proposal.red if reporter_blue else proposal.blue)}
+    targets = [e for e in snapshot.roster if e.player_id in other and not e.is_mock]
+    if not targets:
+        return None
+    mentions = " ".join(f"<@{e.discord_id}>" for e in targets)
+    return (
+        f"{mentions} — foi reportado que o **{SIDE_NAME[match.winner]} ganhou** a in-house "
+        f"#{snapshot.lobby.id}. Confirmem ou contestem na mensagem da lobby.",
+        targets,
+    )
+
+
+def result_reminder_ping(snapshot: LobbySnapshot) -> tuple[str, list[EntryView]] | None:
+    targets = [e for e in snapshot.roster if not e.is_mock]
+    if not targets:
+        return None
+    mentions = " ".join(f"<@{e.discord_id}>" for e in targets)
+    return (
+        f"{mentions} — a in-house #{snapshot.lobby.id} ainda não tem resultado. "
+        "Reportem quem ganhou na mensagem da lobby.",
+        targets,
+    )
+
+
+def _step_label(ladder: LadderConfig, tier_key: str | None, division: int | None) -> str:
+    return ladder.label(tier_key or "", division)
+
+
+def standing_lines(
+    changes: Sequence[StandingChange], names: Mapping[int, str], ladder: LadderConfig
+) -> list[str]:
+    """What moved visibly after the ratings were rebuilt: promotions, demotions, placements.
+
+    Never shows ratings, only tiers; players still in placement are grouped on one line.
+    """
+    lines: list[str] = []
+    placing: list[str] = []
+    for change in sorted(changes, key=lambda c: names.get(c.player_id, "")):
+        name = discord.utils.escape_markdown(names.get(change.player_id, "?"))
+        before, after = change.before, change.after
+        if not after.placed:
+            placing.append(f"{name} {after.games}/{ladder.placement_games}")
+            continue
+        label = _step_label(ladder, after.tier_key, after.division)
+        if before is None or not before.placed:
+            lines.append(f"🎯 **{name}** terminou a colocação: {label}")
+            continue
+        old = step_rank(ladder, before.tier_key, before.division)
+        new = step_rank(ladder, after.tier_key, after.division)
+        if old is None or new is None or old == new:
+            continue
+        up = new > old
+        lines.append(
+            f"{'📈' if up else '📉'} **{name}** {'subiu' if up else 'desceu'} para {label}"
+        )
+    if placing:
+        lines.append("Em colocação: " + " · ".join(placing))
+    return lines
+
+
+def result_summary(
+    snapshot: LobbySnapshot,
+    events: Sequence[str],
+    changes: Sequence[StandingChange],
+    names: Mapping[int, str],
+    ladder: LadderConfig,
+) -> str | None:
+    """The message posted when a result was confirmed, corrected or voided (tiers only)."""
+    match = snapshot.match
+    if match is None:
+        return None
+    lobby_id = snapshot.lobby.id
+    winner = SIDE_NAME.get(match.winner or "", "?")
+    if "voided" in events:
+        head = f"🚫 In-house #{lobby_id} anulada ({match.void_reason or 'sem motivo'})."
+    elif "fixed" in events:
+        head = f"✏️ Resultado da in-house #{lobby_id} corrigido: **{winner} ganhou**."
+    elif "result_confirmed" in events:
+        how = " (confirmado automaticamente)" if match.auto_confirmed else ""
+        head = f"🏆 In-house #{lobby_id}: **{winner} ganhou**{how}."
+    else:
+        return None
+    return "\n".join([head, *standing_lines(changes, names, ladder)])
+
+
+MATCH_STATUS_TEXT = {
+    "in_progress": "Em jogo",
+    "reported": "Resultado por confirmar",
+    "confirmed": "Confirmado",
+    "voided": "Anulado",
+}
+AUDIT_TEXT = {
+    "report": "reportou",
+    "confirm": "confirmou",
+    "auto_confirm": "confirmação automática",
+    "contest": "contestou",
+    "set_winner": "corrigiu o vencedor",
+    "void": "anulou",
+}
+
+
+def build_match_embed(
+    match: MatchRow,
+    teams: Mapping[str, Sequence[tuple[str, str]]],
+    audit: Sequence[tuple[AuditRow, str]],
+) -> discord.Embed:
+    """/match show: status, winner, who played what, and who did what (no ratings)."""
+    embed = discord.Embed(
+        title=f"Jogo #{match.id} · {MATCH_STATUS_TEXT[match.status]}",
+        color=discord.Color.green() if match.status == "confirmed" else discord.Color.dark_grey(),
+    )
+    if match.winner and match.status != "voided":
+        embed.description = f"Vencedor: **{SIDE_NAME[match.winner]}**."
+    elif match.status == "voided":
+        embed.description = f"Anulado ({match.void_reason or 'sem motivo'})."
+    for side in ("blue", "red"):
+        lines = [
+            f"**{ROLE_NAMES_PT[role]}** — {discord.utils.escape_markdown(name)}"
+            for role, name in teams.get(side, ())
+        ]
+        embed.add_field(name=f"{SIDE_EMOJI[side]} {SIDE_NAME[side]}", value="\n".join(lines) or "—")
+    if audit:
+        history = [
+            f"<t:{int(row.created_at.timestamp())}:f> · {discord.utils.escape_markdown(who)} "
+            f"{AUDIT_TEXT.get(row.action, row.action)}"
+            + (f": {row.new_value}" if row.action == "void" and row.new_value else "")
+            for row, who in audit[-10:]
+        ]
+        embed.add_field(name="Histórico", value="\n".join(history), inline=False)
+    return embed
 
 
 def build_list_embed(

@@ -62,6 +62,10 @@ and are marked with 🤖 in lobby messages. You must be registered yourself: `/r
 | Permissions | A non-admin, non-creator account presses **Confirmar**/**Cancelar** | Refused with an explanation |
 | Restart | Restart the bot mid-lobby, then press a button on the old message | It still works (state is in the database; buttons are persistent) |
 | Lost message | `/lobby show` | The lobby is re-posted and the old copy removed |
+| Result flow | After **Confirmar** (teams): `/mock report winner:Azul`, then press **Confirmar resultado** or **Contestar** | With only your account (an admin) the confirm is final at once; use `/mock confirm` to confirm as a mock on the other team |
+| Auto-confirm | `/mock report`, then wait 30 minutes | Confirmed automatically, with a summary in the channel; **Contestar** stops it |
+| Placement | Finish games with the same players | *Colocação n/5* in the summary; the tiers appear after the 5th confirmed game |
+| Correction | `/match fix match:<n> winner:...` or `/match void match:<n>` | The message and ratings follow; `/match show` has the history |
 | Scheduled lobby | `/lobby schedule when:<a few minutes ahead> note:teste`, then `/mock fill lobby:<n>` | Message titled "Agendada" with the time; ten sign-ups wait; at the time the ready-check starts |
 | Reminder | Schedule 31 min ahead and wait one minute | A reminder pinging real signed-up players (never mocks); sent once, also after a restart |
 | Too few at the time | Schedule, sign up fewer than ten, wait for the time | A one-off "só há N/10" notice; the tenth sign-up afterwards starts the ready-check at once |
@@ -73,13 +77,13 @@ To change a player's roles for a test, use `/profile roles` (yourself) or `/admi
 ## Cleaning up
 
 * `/mock clear` deletes the fake players and everything tied to them (ratings, role levels, lobby
-  entries). It refuses while any of them is in an unfinished lobby, so cancel lobbies first. Real
+  entries), **and the finished test games they played**: your own rating is rebuilt without them. It refuses while any of them is in an unfinished lobby, so cancel lobbies first. Real
   players are never touched.
 * Do not leave mock players in a database you care about.
 
 ## Matchmaking without Discord
 
-`python -m bot.features.simulation scenario all` runs the balancer on fixed rosters (five junglers, two Masters who both play mid, a Master among Golds, ...) and checks the expectations; `population --style realistic --lobbies 200` and `league --players 20 --lobbies 150` run many random lobbies. Use `pytest -m "not slow"` to skip the long simulations.
+`python -m bot.features.simulation season --players 14 --games 40 --seed 2` plays a whole season through the real lobby, match and rating code (no Discord) and prints each player's results, visible rank and whether the invariants hold (stored ratings equal a full replay, nobody has a tier before 5 games, nobody is left busy). `python -m bot.features.simulation scenario all` runs the balancer on fixed rosters (five junglers, two Masters who both play mid, a Master among Golds, ...) and checks the expectations; `population --style realistic --lobbies 200` and `league --players 20 --lobbies 150` run many random lobbies. Use `pytest -m "not slow"` to skip the long simulations.
 
 ## What these tests do not cover
 
