@@ -84,6 +84,12 @@ def main(argv: list[str] | None = None) -> int:
     tu.add_argument("--deviation-sd", type=float, default=World.deviation_sd)
     tu.add_argument("--outlier-share", type=float, default=World.outlier_share)
     tu.add_argument("--form-sd", type=float, default=World.form_sd)
+    tu.add_argument(
+        "--form-persistence",
+        type=float,
+        default=World.form_persistence,
+        help="how much of a game's form carries into the next (0..1)",
+    )
     for p in (sc, pop, lg):
         p.add_argument("--w-lane", type=float, default=BalanceParams.w_lane)
         p.add_argument("--w-role", type=float, default=BalanceParams.w_role)
@@ -160,7 +166,12 @@ def _tune(args: argparse.Namespace) -> int:
             print(f"{group}: {', '.join(names)}")
         return 0
     world = World(
-        args.size, args.deviation_sd, args.outlier_share, World.outlier_size, args.form_sd
+        args.size,
+        args.deviation_sd,
+        args.outlier_share,
+        World.outlier_size,
+        args.form_sd,
+        args.form_persistence,
     )
     seeds = tuple(range(1, args.seeds + 1))
     base = _parse_overrides(args.set)

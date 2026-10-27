@@ -7,6 +7,7 @@ from lobby_fakes import ADMIN, CHANNEL, GUILD, LobbyStack
 from bot.db import Database
 from bot.features.lobby.mock import DISABLED, MockPlayers
 from bot.features.players.service import PlayerError
+from bot.features.ratings.params import MatchmakingParams
 
 
 @pytest_asyncio.fixture
@@ -51,7 +52,9 @@ async def test_mock_players_get_a_rank_a_rating_and_role_comfort_like_real_ones(
     [player] = await mock.create(1, ADMIN)
     inspection = await stack.ratings.inspect(player.id)
     assert inspection.resolution.rank is not None  # a self-reported League rank
-    assert inspection.stored.sigma == pytest.approx(6.5)  # seeded from it
+    assert inspection.stored.sigma == pytest.approx(
+        MatchmakingParams().sigma_rank_seed
+    )  # seeded from it
     lines = await stack.players.role_lines(player.id)
     values = [line.proficiency.value for line in lines]
     assert all(v is not None for v in values)

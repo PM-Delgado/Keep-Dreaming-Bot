@@ -40,7 +40,7 @@ override for every row). Every row uses the same seeds, so differences come from
   placed players within one step.
 * `moves`: visible tier changes per player over the season (flapping).
 
-## Findings so far (60 games, 6 seeds unless noted)
+## Findings (60 games, 6 seeds unless noted; items 2-3 compare the old defaults with the new)
 
 1. **Perfect ratings make the balancer nearly perfect**: with `oracle=1`, 0% of games are lopsided
    and the mean edge is 0.012. Everything left is a question of *knowing* how good people are.
@@ -64,21 +64,44 @@ override for every row). Every row uses the same seeds, so differences come from
    system little; the first ~20 games (about 7 per player) change almost nothing. More *signals*
    are the way forward, not more parameter tweaking (see below).
 
-## Recommended settings (proposal; applied in the follow-up tuning change)
+## Settings applied
 
-| setting | now | proposed | why |
+| setting | was | now | why |
 |---|---|---|---|
-| `sigma_rank_seed` | 6.5 | 2.0 (2-3 is fine) | trust the Riot rank until results say otherwise |
+| `sigma_rank_seed` | 6.5 | 2.0 | trust the Riot rank until results say otherwise |
 | `d_down` | 3.0 | 2.0 | a slump should not drag the matchmaking estimate far below the rank |
 | `beta`, `d_up`, `tau`, ladder | unchanged | unchanged | no clear gain in the search |
 
 Changing these does not rewrite history: `sigma_rank_seed` only affects *new* seeds and `d_down` is
-applied when the estimate is computed.
+applied when the estimate is computed. Players already seeded keep their stored sigma.
+
+## Experiment: form from the last five scrims (result: no gain, left off)
+
+The signal: the average of (won - the win chance the bot predicted) over a player's last
+`form_games` confirmed games, times `form_weight` rating points (capped at `form_cap`), added to
+the matchmaking estimate E only. Never H, never the visible tier. The world has hidden form that the
+bot cannot see, so the signal has something real to find. Games decided with the day's form
+(`w/form: lop` = share clearly lopsided counting form; `p-err` = prediction error against the odds
+that decided the game; 10 seeds, 60 games, new defaults):
+
+| hidden form | weight 0 (off) | weight 2 | weight 4 | weight 8 |
+|---|---|---|---|---|
+| sd 1, fades fast (like a normal day-to-day swing) | 40% / .140 | 43% / .143 | 45% / .149 | 47% / .158 |
+| sd 3, fades fast | 64% / .222 | 66% / .232 | 64% / .221 | 67% / .235 |
+| sd 2.5, streaky (carries 80%) | 57% / .193 | | 61% / .202 | 60% / .199 |
+| sd 3, very streaky (carries 95%) | 64% / .216 | | 63% / .214 | 65% / .220 |
+
+A window of 3 or 10 games gave the same picture. The signal is never clearly better than nothing and
+is usually a little worse: one balanced game is nearly a coin flip, so five of them say very little
+about someone's form, and the adjustment mostly adds noise. It stays at `form_weight = 0`. The code
+is small and tested, so a better signal can reuse it.
 
 ## Ideas to test next
 
-* **Form from the last five scrims** as part of the estimate (the simulated world already has
-  hidden form, so the benefit can be measured), and performance signals once KDA is recorded (M3b).
+* **A stronger per-game performance signal** than win/loss, once kills/deaths/assists are recorded
+  (M3b): a game's KDA says more about a player's day than a coin-flip result does.
+## Ideas to test next
+
 * Riot ranked history (recent win rate, games played, LP trend) as an extra prior; stale or
   inactive ranks widen the uncertainty.
 * Adaptive uncertainty: raise a player's sigma when they keep beating or losing to the prediction.

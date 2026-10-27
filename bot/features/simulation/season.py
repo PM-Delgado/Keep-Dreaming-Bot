@@ -98,6 +98,16 @@ class SeasonGame:
         return abs(self.true_blue - 0.5)
 
     @property
+    def outcome_edge(self) -> float:
+        """How uneven the game really was, form included (the odds that decided it)."""
+        return abs(self.outcome_blue - 0.5)
+
+    @property
+    def outcome_p_error(self) -> float:
+        """How far the prediction was from the odds that decided the game, form included."""
+        return abs(self.predicted_blue - self.outcome_blue)
+
+    @property
     def p_error(self) -> float:
         """How far the balancer's prediction was from the skill-only truth."""
         return abs(self.predicted_blue - self.true_blue)
@@ -142,6 +152,17 @@ class SeasonReport:
         return sum(g.true_edge >= 0.15 for g in self.games) / len(self.games)
 
     @property
+    def outcome_lopsided_share(self) -> float:
+        """Like `lopsided_share`, but counting the day's form: how fair games really were."""
+        if not self.games:
+            return 0.0
+        return sum(g.outcome_edge >= 0.15 for g in self.games) / len(self.games)
+
+    @property
+    def mean_outcome_p_error(self) -> float:
+        return statistics.fmean(g.outcome_p_error for g in self.games) if self.games else 0.0
+
+    @property
     def mean_p_error(self) -> float:
         return statistics.fmean(g.p_error for g in self.games) if self.games else 0.0
 
@@ -179,6 +200,7 @@ class Season:
         self.lobby_repo = LobbyRepository(db)
         self.match_repo = MatchRepository(db)
         ratings.matches_source = self.match_repo.confirmed_for_replay
+        ratings.form_source = self.match_repo.recent_results
         self.matches = MatchService(
             self.match_repo,
             self.lobby_repo,

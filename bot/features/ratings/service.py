@@ -2,15 +2,17 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 from bot.features.ratings.engine import RatingEngine
 from bot.features.ratings.ladder import DEFAULT_LADDER, LadderConfig, Standing, step_progress
 from bot.features.ratings.matchmaking import (
     Estimate,
+    FormGame,
     default_seed,
     effective_estimate,
+    form_adjustment,
     seed_from_rank,
 )
 from bot.features.ratings.params import MatchmakingParams, algo_version
@@ -32,6 +34,10 @@ class RatingError(ValueError):
 
 
 async def _no_matches() -> list[MatchIn]:
+    return []
+
+
+async def _no_form(player_id: int, limit: int) -> list[FormGame]:
     return []
 
 
@@ -70,6 +76,7 @@ class RatingService:
         self.clock = clock
         self.main_puuid_of = main_puuid_of  # M1b injects the designated main account's puuid
         self.matches_source: Callable[[], Awaitable[list[MatchIn]]] = _no_matches  # set by M3
+        self.form_source: Callable[[int, int], Awaitable[list[FormGame]]] = _no_form  # ... and this
         self.algo_version = algo_version(self.engine.params)
         self._rebuild_lock = asyncio.Lock()
 
@@ -243,6 +250,10 @@ class RatingService:
         resolution = await self.resolve(player_id)
         rank_mu = resolution.rank.mu(self.params) if resolution.rank else None
         estimate = effective_estimate(stored.mu, stored.sigma, rank_mu, self.params)
+        if self.params.form_weight:
+            recent = await self.form_source(player_id, self.params.form_games)
+            form = form_adjustment(recent, self.params)
+            estimate = replace(estimate, mu=estimate.mu + form, form=form)
         now = self.clock()
         age = rank_age_days(resolution.rank, now) if resolution.rank else None
         stale = is_stale(resolution.rank, now, self.params) if resolution.rank else False
