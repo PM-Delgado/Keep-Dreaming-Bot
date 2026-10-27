@@ -29,7 +29,7 @@ class Admin(commands.Cog):
         synced = await self.bot.tree.sync(guild=guild)
         log.info("Synced %d commands via /sync", len(synced))
         await interaction.response.send_message(
-            f"Sincronizados {len(synced)} comandos.", ephemeral=True
+            f"🔄 Sincronizados {len(synced)} comandos.", ephemeral=True
         )
 
 

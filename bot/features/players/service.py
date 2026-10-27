@@ -17,6 +17,7 @@ from bot.features.ratings.rank import RankResolution
 from bot.features.ratings.service import RatingService
 
 NICKNAME_MIN, NICKNAME_MAX = 2, 24
+NOT_REGISTERED = "KD Scrims: Jogador não registado. Usa /register primeiro."
 CHAMPION_POOL_SIZE = 3  # champions shown from the player's ranked Solo/Duo games
 
 
@@ -108,7 +109,7 @@ class PlayerService:
     async def require(self, discord_id: int) -> Player:
         player = await self.repo.get_by_discord(discord_id)
         if player is None or player.left_at is not None:
-            raise PlayerError("Esse jogador não está registado. Usa /register primeiro.")
+            raise PlayerError(NOT_REGISTERED)
         return player
 
     async def set_declared(self, discord_id: int, role: str, value: int | None) -> Player:

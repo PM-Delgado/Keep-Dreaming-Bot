@@ -10,9 +10,8 @@ from discord.ext import commands
 
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
-from bot.features.players.profile_embed import NOT_REGISTERED
 from bot.features.players.repository import Player
-from bot.features.players.service import PlayerError
+from bot.features.players.service import NOT_REGISTERED, PlayerError
 from bot.features.players.text import tier_color
 from bot.features.stats.render import build_board_embed, build_history_embed, build_stats_embed
 from bot.features.stats.repository import StatsRepository
@@ -69,7 +68,7 @@ class Stats(commands.Cog):
         return member.display_avatar.url
 
     @app_commands.command(
-        name="history", description="Mostra os últimos jogos in-house de um jogador."
+        name="history", description="Mostra os últimos jogos de Scrims de um jogador."
     )
     @app_commands.describe(user="De quem queres ver o histórico (por defeito, o teu).")
     async def history(self, interaction: discord.Interaction, user: discord.Member | None = None):
@@ -95,7 +94,7 @@ class Stats(commands.Cog):
         await interaction.response.send_message(embed=embed, allowed_mentions=NO_MENTIONS)
 
     @app_commands.command(
-        name="stats", description="Mostra as estatísticas in-house de um jogador."
+        name="stats", description="Mostra as estatísticas de Scrims de um jogador."
     )
     @app_commands.describe(user="De quem queres ver as estatísticas (por defeito, as tuas).")
     async def stats(self, interaction: discord.Interaction, user: discord.Member | None = None):

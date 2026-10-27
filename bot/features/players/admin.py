@@ -27,10 +27,13 @@ NO_MENTIONS = discord.AllowedMentions.none()
 
 def build_inspection_embed(nickname: str, ins: Inspection, ladder_label: str) -> discord.Embed:
     """Admin diagnostics: the only place raw numbers are shown."""
-    embed = discord.Embed(title=f"Rating de {nickname}", color=discord.Color.dark_grey())
+    embed = discord.Embed(
+        description=f"# 🔬 Rating · {discord.utils.escape_markdown(nickname)}",
+        color=discord.Color.dark_grey(),
+    )
     s = ins.stored
     embed.add_field(
-        name="H (in-house)",
+        name="H (Scrims)",
         value=f"mu {s.mu:.2f} · sigma {s.sigma:.2f} · {s.games} jogos\n{ladder_label}",
         inline=False,
     )
@@ -58,15 +61,15 @@ class InhouseAdmin(commands.Cog):
         self.players = players
         self.ratings = ratings
 
-    admin = app_commands.Group(name="admin", description="Comandos de administração in-house.")
+    admin = app_commands.Group(name="admin", description="Comandos de administração dos Scrims.")
     player = app_commands.Group(name="player", description="Jogadores.", parent=admin)
     rating = app_commands.Group(name="rating", description="Ratings.", parent=admin)
     roles = app_commands.Group(name="roles", description="Roles.", parent=admin)
 
-    @player.command(name="register", description="Regista um membro nos in-houses.")
+    @player.command(name="register", description="Regista um membro nos Scrims.")
     @app_commands.describe(
         member="O membro a registar.",
-        display_name="Nome nos in-houses (por defeito, o nome atual no Discord).",
+        display_name="Nome nos Scrims (por defeito, o nome atual no Discord).",
     )
     @admin_only
     async def player_register(
@@ -82,7 +85,7 @@ class InhouseAdmin(commands.Cog):
         except AlreadyRegisteredError as exc:
             # Non-destructive: the existing profile, rating, ranks and roles are left as they were.
             await interaction.response.send_message(
-                f"{exc.player.nickname} já está registado. Nada foi alterado.",
+                f"ℹ️ {exc.player.nickname} já está registado. Nada foi alterado.",
                 ephemeral=True,
                 allowed_mentions=NO_MENTIONS,
             )
@@ -96,12 +99,12 @@ class InhouseAdmin(commands.Cog):
         log.info("Admin %s registered player %s", interaction.user.id, player.id)
         nickname = discord.utils.escape_markdown(player.nickname)
         await interaction.response.send_message(
-            f"{member.mention} registado como **{nickname}**.",
+            f"✅ {member.mention} registado como **{nickname}**.",
             ephemeral=True,
             allowed_mentions=NO_MENTIONS,
         )
 
-    @rating.command(name="set", description="Ajusta o rating in-house (mu/sigma) de um jogador.")
+    @rating.command(name="set", description="Ajusta o rating dos Scrims (mu/sigma) de um jogador.")
     @app_commands.describe(mu="Novo mu (0-100).", sigma="Novo sigma (0,5-25); omite para manter.")
     @admin_only
     async def rating_set(
@@ -120,7 +123,7 @@ class InhouseAdmin(commands.Cog):
             return
         log.info("Admin %s adjusted rating of player %s", interaction.user.id, player.id)
         await interaction.response.send_message(
-            f"Rating de **{player.nickname}**: mu {stored.mu:.2f}, sigma {stored.sigma:.2f}.",
+            f"🎚️ Rating de **{player.nickname}**: mu {stored.mu:.2f}, sigma {stored.sigma:.2f}.",
             ephemeral=True,
             allowed_mentions=NO_MENTIONS,
         )
@@ -148,7 +151,7 @@ class InhouseAdmin(commands.Cog):
     async def rating_recompute(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         await self.ratings.rebuild()
-        await interaction.followup.send("Ratings reconstruídos.", ephemeral=True)
+        await interaction.followup.send("🔄 Ratings reconstruídos.", ephemeral=True)
 
     @rating.command(
         name="rank", description="Define (ou limpa) o rank de referência de um jogador."
@@ -176,7 +179,7 @@ class InhouseAdmin(commands.Cog):
             return
         text = f"Rank de referência: **{rank.label()}**." if rank else "Sem rank de referência."
         await interaction.response.send_message(
-            f"{player.nickname}: {text}", ephemeral=True, allowed_mentions=NO_MENTIONS
+            f"🎖️ {player.nickname}: {text}", ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
     @roles.command(name="set", description="Define (ou limpa) a proficiência de admin numa role.")
@@ -199,7 +202,7 @@ class InhouseAdmin(commands.Cog):
             return
         done = "limpa" if not proficiency.value else f"definida para {proficiency.value}/5"
         await interaction.response.send_message(
-            f"Proficiência (admin) de **{player.nickname}** em {role.name} {done}.",
+            f"✅ Proficiência (admin) de **{player.nickname}** em {role.name} {done}.",
             ephemeral=True,
             allowed_mentions=NO_MENTIONS,
         )

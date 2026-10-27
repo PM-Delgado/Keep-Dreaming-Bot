@@ -26,7 +26,6 @@ from bot.features.stats.render import (
 from bot.features.stats.service import PlayerStats, Tally
 
 GROUP_TITLE = "Scrims"
-NOT_REGISTERED = "KD Scrims: Jogador não registado. Usa /register primeiro."
 
 
 def in_house_rank_text(profile: Profile, ladder: LadderConfig) -> str:

@@ -9,9 +9,8 @@ import pytest
 import pytest_asyncio
 from lobby_fakes import ADMIN, GUILD, LobbyStack, sides_of, start_game
 
-from bot.features.players.profile_embed import NOT_REGISTERED
 from bot.features.players.repository import Player
-from bot.features.players.service import PlayerError
+from bot.features.players.service import NOT_REGISTERED, PlayerError
 from bot.features.ratings.ladder import DEFAULT_LADDER
 from bot.features.stats.cog import Stats
 from bot.features.stats.render import (

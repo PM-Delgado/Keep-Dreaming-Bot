@@ -9,13 +9,9 @@ from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
 from bot.features.players.admin import InhouseAdmin, build_inspection_embed
 from bot.features.players.cog import Players
-from bot.features.players.profile_embed import (
-    NOT_REGISTERED,
-    build_profile_embed,
-    in_house_rank_text,
-)
+from bot.features.players.profile_embed import build_profile_embed, in_house_rank_text
 from bot.features.players.repository import PlayerRepository
-from bot.features.players.service import PlayerService
+from bot.features.players.service import NOT_REGISTERED, PlayerService
 from bot.features.players.text import progress_bar
 from bot.features.ratings.ladder import DEFAULT_LADDER, Standing
 from bot.features.ratings.params import MatchmakingParams
@@ -75,7 +71,7 @@ async def test_register_command_replies_ephemerally_and_rejects_duplicates(stack
     first = fake_interaction(1)
     await players_cog.register.callback(players_cog, first, "Ana")
     assert first.response.sent[0]["ephemeral"] is True
-    assert "Registado" in first.response.sent[0]["content"]
+    assert "Bem-vindo aos Scrims" in first.response.sent[0]["content"]
     second = fake_interaction(1)
     await players_cog.register.callback(players_cog, second, "Ana2")
     assert "Já estás registado" in second.response.sent[0]["content"]
@@ -236,7 +232,7 @@ async def test_admin_register_of_an_existing_player_changes_nothing(stack):
         await admin_cog.player_register.callback(admin_cog, ix, fake_member(8, "Novo"), name)
         reply = ix.response.sent[0]
         assert reply["ephemeral"] is True
-        assert reply["content"] == "Original já está registado. Nada foi alterado."
+        assert reply["content"] == "ℹ️ Original já está registado. Nada foi alterado."
     assert await snapshot() == before
 
 
@@ -334,3 +330,16 @@ async def test_the_side_bar_has_the_colour_of_the_league_tier(stack):
     await ratings.set_self_reported_rank(player.id, "MASTER", None, 1)
     master = build_profile_embed(await players.profile(1), DEFAULT_LADDER)
     assert master.color == discord.Color(0x9D5CC9)
+
+
+async def test_profile_roles_replies_with_the_role_icon_and_clears_with_a_broom(stack):
+    players_cog, _, players, _ = stack
+    await players.register(1, "Ana")
+    players_cog.icons = SimpleNamespace(markup=lambda: {"MID": "<:role_mid:8>"})  # type: ignore[assignment]
+    mid, top = SimpleNamespace(value="MID", name="Mid"), SimpleNamespace(value="TOP", name="Top")
+    ix = fake_interaction(1)
+    await players_cog.roles.callback(players_cog, ix, mid, SimpleNamespace(value=4))
+    assert ix.response.sent[0]["content"] == "✅ <:role_mid:8>: 4/5."
+    ix = fake_interaction(1)
+    await players_cog.roles.callback(players_cog, ix, top, SimpleNamespace(value=0))
+    assert ix.response.sent[0]["content"] == "🧹 **Top**: limpa."  # no icon: the name stands in

@@ -62,7 +62,7 @@ async def test_the_time_is_validated_with_helpful_messages(stack):
     strict = stack.make_service(params=LobbyParams(min_lead_minutes=120))
     with pytest.raises(PlayerError, match="pelo menos"):
         await strict.schedule(GUILD, CHANNEL, 1, WHEN)
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await stack.lobbies.schedule(GUILD, CHANNEL, 404, WHEN)
     assert await stack.repo.list_scheduled(GUILD) == []  # nothing half-created
 

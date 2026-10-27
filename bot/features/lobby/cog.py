@@ -10,6 +10,7 @@ from discord.ext import commands, tasks
 from bot.features.icons.roles import RoleIconService
 from bot.features.lobby.mock import MockPlayers
 from bot.features.lobby.render import (
+    SIDE_NAME,
     build_list_embed,
     build_lobby_embed,
     build_match_embed,
@@ -61,8 +62,8 @@ class Lobby(commands.Cog):
     def _role_icons(self) -> dict[str, str]:
         return self.icons.markup() if self.icons is not None else {}
 
-    lobby = app_commands.Group(name="lobby", description="Lobbies de in-house.")
-    match_group = app_commands.Group(name="match", description="Jogos e resultados de in-house.")
+    lobby = app_commands.Group(name="lobby", description="Lobbies de Scrims.")
+    match_group = app_commands.Group(name="match", description="Jogos e resultados dos Scrims.")
     mock_group = app_commands.Group(
         name="mock", description="Jogadores de teste (só com ENABLE_MOCK_PLAYERS)."
     )
@@ -205,7 +206,7 @@ class Lobby(commands.Cog):
 
     # --- /lobby ----
 
-    @lobby.command(name="open", description="Abre uma lobby de in-house neste canal.")
+    @lobby.command(name="open", description="Abre uma lobby de Scrims neste canal.")
     async def open_lobby(self, interaction: discord.Interaction) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
@@ -307,7 +308,7 @@ class Lobby(commands.Cog):
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        await interaction.response.send_message("Lobby cancelada.", ephemeral=True)
+        await interaction.response.send_message("🛑 Lobby cancelada.", ephemeral=True)
         await self.refresh_message(update.snapshot)
 
     # --- /match ----
@@ -360,7 +361,9 @@ class Lobby(commands.Cog):
         self, interaction: discord.Interaction, match: int, reason: str = "anulado por um admin"
     ) -> None:
         await self._match_command(
-            interaction, lambda: self.service.void_match(match, interaction.user.id, reason[:100])
+            interaction,
+            lambda: self.service.void_match(match, interaction.user.id, reason[:100]),
+            f"🚫 Jogo #{match} anulado.",
         )
 
     @match_group.command(name="fix", description="Corrige ou decide o vencedor de um jogo (admin).")
@@ -371,7 +374,9 @@ class Lobby(commands.Cog):
         self, interaction: discord.Interaction, match: int, winner: app_commands.Choice[str]
     ) -> None:
         await self._match_command(
-            interaction, lambda: self.service.fix_match(match, interaction.user.id, winner.value)
+            interaction,
+            lambda: self.service.fix_match(match, interaction.user.id, winner.value),
+            f"✏️ Jogo #{match}: **{SIDE_NAME[winner.value]}** ganhou.",
         )
 
     # --- /match stats: champion and KDA ----
@@ -415,7 +420,7 @@ class Lobby(commands.Cog):
                 interaction.user.id, champion, kills, deaths, assists, match
             )
             text = stats_text(result.participant, result.champion_name)
-            return f"Jogo #{result.match_id}: **{text}** registado. Falta um admin validar."
+            return f"📝 Jogo #{result.match_id}: **{text}** registado. Falta um admin validar ⏳"
 
         await self._stats_command(interaction, action)
 
@@ -454,7 +459,7 @@ class Lobby(commands.Cog):
                 role.value if role else None,
             )
             return (
-                f"Jogo #{match}: **{stats_text(result.participant, result.champion_name)}** de "
+                f"📝 Jogo #{match}: **{stats_text(result.participant, result.champion_name)}** de "
                 f"{discord.utils.escape_markdown(member.display_name)} guardado."
             )
 
@@ -485,7 +490,7 @@ class Lobby(commands.Cog):
             results = await self.service.matches.validate_stats(
                 interaction.user.id, match, member.id if member else None
             )
-            return f"Jogo #{match}: {len(results)} stats validadas."
+            return f"✅ Jogo #{match}: {len(results)} stats validadas."
 
         await self._stats_command(interaction, action)
 
@@ -516,13 +521,13 @@ class Lobby(commands.Cog):
             embed=build_pending_embed(items), ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
-    async def _match_command(self, interaction: discord.Interaction, action) -> None:
+    async def _match_command(self, interaction: discord.Interaction, action, done: str) -> None:
         try:
             update = await action()
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        await interaction.response.send_message("Feito.", ephemeral=True)
+        await interaction.response.send_message(done, ephemeral=True)
         await self.refresh_message(update.snapshot)
         await self.notify(update)
 

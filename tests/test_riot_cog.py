@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from typing import Any
 
+import discord
 import pytest_asyncio
 from riot_fakes import NOW, FakeRiot, Stack, days_ago
 
@@ -22,7 +23,9 @@ ENV = {
 
 class FakeInteraction:
     def __init__(self, user_id: int) -> None:
-        self.user = SimpleNamespace(id=user_id)
+        self.user = SimpleNamespace(
+            id=user_id, display_avatar=SimpleNamespace(url="https://cdn.invalid/a.png")
+        )
         self.sent: list[dict] = []  # everything said, in order
         self._done = False
         self.namespace = SimpleNamespace()
@@ -48,7 +51,9 @@ class FakeInteraction:
 
 
 def member(user_id: int):
-    return SimpleNamespace(id=user_id)
+    return SimpleNamespace(
+        id=user_id, display_avatar=SimpleNamespace(url="https://cdn.invalid/a.png")
+    )
 
 
 @pytest_asyncio.fixture
@@ -149,7 +154,7 @@ async def test_unknown_account_and_unregistered_player_get_clear_messages(cog_st
     assert "não está ligada" in ix.sent[0]["content"]
     ix = FakeInteraction(404)
     await cog.link.callback(cog, ix, "Alpha#EUW", None, None)  # type: ignore[arg-type]
-    assert "não está registado" in ix.sent[0]["content"]
+    assert "não registado" in ix.sent[0]["content"]
 
 
 async def test_integration_disabled_without_a_key(db):
@@ -205,8 +210,13 @@ async def test_profile_and_list_embeds_show_accounts_rank_age_and_state(cog_stac
     assert fields["Contas Riot"] == "Alpha#EUW ★"
     assert fields["Rank League"] == "Gold II"
     assert "Sem rank (colocação 0/5)" in fields["Scrims"]  # never mirrors Riot's rank
-    listing = build_list_embed("Ana", await stack.riot.accounts(1), NOW)
+    listing = build_list_embed(
+        "Ana", await stack.riot.accounts(1), NOW, "https://cdn.invalid/a.png", discord.Color(7)
+    )
     assert "3 jogos ranked" in (listing.description or "")
+    assert (listing.description or "").startswith("# Contas Riot · Ana")
+    assert listing.footer.text is None and listing.thumbnail.url == "https://cdn.invalid/a.png"
+    assert listing.color == discord.Color(7)
 
 
 def test_link_summary_mentions_pending_rank_and_background_sync():

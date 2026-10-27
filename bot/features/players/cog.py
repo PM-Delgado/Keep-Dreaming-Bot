@@ -20,9 +20,9 @@ from bot.features.players.choices import (
     ROLE_CHOICES,
     TIER_CHOICES,
 )
-from bot.features.players.profile_embed import NOT_REGISTERED, build_profile_embed
+from bot.features.players.profile_embed import build_profile_embed
 from bot.features.players.repository import PlayerRepository
-from bot.features.players.service import PlayerError, PlayerService
+from bot.features.players.service import NOT_REGISTERED, PlayerError, PlayerService
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingError, RatingService
 
@@ -49,10 +49,10 @@ class Players(commands.Cog):
         self.stats: StatsService | None = None
         self.champions: ChampionService | None = None
 
-    profile = app_commands.Group(name="profile", description="O teu perfil in-house.")
+    profile = app_commands.Group(name="profile", description="O teu perfil de Scrims.")
 
-    @app_commands.command(name="register", description="Regista-te nos in-houses.")
-    @app_commands.describe(nickname="O nome que aparece nos in-houses (2 a 24 caracteres).")
+    @app_commands.command(name="register", description="Regista-te nos Scrims.")
+    @app_commands.describe(nickname="O nome que aparece nos Scrims (2 a 24 caracteres).")
     async def register(self, interaction: discord.Interaction, nickname: str) -> None:
         try:
             player = await self.players.register(interaction.user.id, nickname)
@@ -60,12 +60,12 @@ class Players(commands.Cog):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
-            f"Registado como **{discord.utils.escape_markdown(player.nickname)}**! "
-            "Define as tuas roles com /profile roles e o teu rank com /profile rank.",
+            f"🎉 Bem-vindo aos Scrims, **{discord.utils.escape_markdown(player.nickname)}**! "
+            "Define as tuas roles com `/profile roles` e o teu rank com `/profile rank`.",
             ephemeral=True,
         )
 
-    @profile.command(name="view", description="Mostra um perfil in-house.")
+    @profile.command(name="view", description="Mostra um perfil de Scrims.")
     @app_commands.describe(user="De quem queres ver o perfil (por defeito, o teu).")
     async def view(self, interaction: discord.Interaction, user: discord.Member | None = None):
         target = user or interaction.user
@@ -115,10 +115,9 @@ class Players(commands.Cog):
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        done = "limpa" if value is None else f"definida para {value}/5"
-        await interaction.response.send_message(
-            f"Proficiência em **{role.name}** {done}.", ephemeral=True
-        )
+        icon = (self.icons.markup() if self.icons else {}).get(role.value) or f"**{role.name}**"
+        done = "🧹 {role}: limpa." if value is None else "✅ {role}: {value}/5."
+        await interaction.response.send_message(done.format(role=icon, value=value), ephemeral=True)
 
     @profile.command(name="rank", description="Diz-nos o teu rank de Solo/Duo no League.")
     @app_commands.describe(tier="O teu tier.", division="A divisão (ignorada em Master+).")
@@ -139,8 +138,8 @@ class Players(commands.Cog):
             return
         label = rank.label() if rank else tier.name
         await interaction.response.send_message(
-            f"Rank de referência: **{label}**. Serve só como ponto de partida; "
-            "o rank do grupo vem dos jogos in-house.",
+            f"✅ Rank de referência: **{label}**. Serve só como ponto de partida; "
+            "o rank dos Scrims vem dos jogos.",
             ephemeral=True,
         )
 

@@ -114,7 +114,7 @@ async def test_link_errors_are_clear_and_leave_nothing_behind(stack, world):
         await stack.riot.link(1, "Nobody#EUW", None, ADMIN)
     with pytest.raises(PlayerError, match="plataforma NA1"):
         await stack.riot.link(1, "Alpha#EUW", "na1", ADMIN)  # exists, but not on that platform
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await stack.riot.link(404, "Alpha#EUW", None, ADMIN)
     world.forced["/riot/account"] = 403
     with pytest.raises(PlayerError, match="chave da API"):
