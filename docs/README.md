@@ -7,6 +7,7 @@
 | [simulations.md](simulations.md) | run scenarios, whole simulated seasons and the tuning lab without Discord |
 | [tuning.md](tuning.md) | see how the settings were chosen: method, assumptions, findings and the next experiments |
 | [testing-lobbies.md](testing-lobbies.md) | test lobbies, results and ranks by hand in Discord with mock players |
+| [../README.md#testing-the-commands](../README.md#testing-the-commands) | check every command's answer, and build a demo database (`tools/seed_demo.py`) to review all embeds |
 | [riot-policy.md](riot-policy.md) | read the accepted Riot policy risk and how Riot data is handled |
 
 The project README gives the overview and the setup; `CLAUDE.md` holds the working rules for

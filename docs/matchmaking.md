@@ -185,7 +185,7 @@ OPEN -> READY_CHECK -> TEAMS_PROPOSED -> IN_PROGRESS -> COMPLETED
    (`/match validate`, `/match pending` lists them). Admin entries (`/match set`) are validated at
    once and can also record the role a player actually played. Editing validated stats sends them
    back to pending. Stats are audited like results, never change a result or a rating, and only
-   validated stats are meant for public numbers (M3c). The champion list comes from Data Dragon,
+   only validated stats feed the public numbers (`/history`, `/stats`, `/leaderboard`). The champion list comes from Data Dragon,
    cached in the database (with a bundled list for the first start).
 
 Players in a started game cannot join another lobby until its result is in. Signing up to a

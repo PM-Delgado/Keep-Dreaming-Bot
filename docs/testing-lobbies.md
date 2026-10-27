@@ -34,8 +34,9 @@ and are marked with 🤖 in lobby messages. You must be registered yourself: `/r
    ("Equilibrado", "Ligeira vantagem ...", ...). No ratings are shown. A note like `· 4/5` after a
    name means that player was **not** put on their best role and shows their level on the role they
    got; no note means they are on their best.
-5. **Confirmar** starts the game (creator or admin only). Recording the result arrives with a
-   later milestone; a started game expires after 12 h, or use **Cancelar**.
+5. **Confirmar** starts the game (creator or admin only). Report the result with the **Azul ganhou** /
+   **Vermelho ganhou** buttons or `/mock report`; a started game nobody reports is voided after
+   12 h, or use **Cancelar**. Afterwards try `/match stats`, `/history`, `/stats` and `/leaderboard`.
 
 ## Testing the role logic
 
