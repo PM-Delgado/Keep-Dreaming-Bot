@@ -1,0 +1,8 @@
+# Runtime dependencies for the Railway build (Railpack installs from this file).
+# Keep in step with [project].dependencies in pyproject.toml; tests/test_requirements.py checks it.
+discord.py>=2.4
+python-dotenv>=1.0
+aiosqlite>=0.20
+aiohttp>=3.9
+openskill==6.2.0
+tzdata
