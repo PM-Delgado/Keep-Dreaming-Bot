@@ -25,6 +25,7 @@ from bot.features.players.repository import PlayerRepository
 from bot.features.players.service import NOT_REGISTERED, PlayerError, PlayerService
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingError, RatingService
+from bot.interaction_log import log_refusal
 
 if TYPE_CHECKING:
     from bot.app import KDBot
@@ -57,6 +58,7 @@ class Players(commands.Cog):
         try:
             player = await self.players.register(interaction.user.id, nickname)
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
@@ -71,10 +73,12 @@ class Players(commands.Cog):
         target = user or interaction.user
         try:
             profile = await self.players.profile(target.id)
-        except PlayerError:
+        except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
             return
         except RatingError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         stats = None
@@ -113,6 +117,7 @@ class Players(commands.Cog):
         try:
             await self.players.set_declared(interaction.user.id, role.value, value)
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         icon = (self.icons.markup() if self.icons else {}).get(role.value) or f"**{role.name}**"
@@ -134,6 +139,7 @@ class Players(commands.Cog):
                 player.id, tier.value, division.value if division else None, interaction.user.id
             )
         except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         label = rank.label() if rank else tier.name

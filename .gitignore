@@ -31,6 +31,7 @@ data/
 *.sqlite3-shm
 *.sqlite3.bak*
 *.log
+logs/
 
 # Manual-test screenshots and other local artefacts (can contain Discord names)
 m1a-screenshots-test/

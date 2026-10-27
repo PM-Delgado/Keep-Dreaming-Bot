@@ -31,6 +31,7 @@ from bot.features.matches.repository import PENDING, MatchRepository
 from bot.features.matches.service import MAX_STAT, MatchParams, MatchService, stats_text
 from bot.features.players.choices import ROLE_CHOICES
 from bot.features.players.service import PlayerError
+from bot.interaction_log import log_refusal
 from bot.permissions import admin_only, is_admin
 
 if TYPE_CHECKING:
@@ -97,6 +98,13 @@ class Lobby(commands.Cog):
     @sweeper.before_loop
     async def _before_sweeper(self) -> None:
         await self.bot.wait_until_ready()
+        active = await self.service.repo.list_by_status(list(ACTIVE))
+        log.info(
+            "Lobby sweeper running every %ds; %d active lobbies carried over: %s",
+            SWEEP_SECONDS,
+            len(active),
+            ", ".join(f"#{lobby.id} {lobby.status}" for lobby in active) or "none",
+        )
 
     # --- messages ----
 
@@ -138,6 +146,14 @@ class Lobby(commands.Cog):
         """Ping real players (never mock ones): ready-check (re)starts, scheduled reminders."""
         events = set(update.events)
         lobby = update.snapshot.lobby
+        if events:
+            log.info(
+                "Lobby %s (%s): %s%s",
+                lobby.id,
+                lobby.status,
+                ", ".join(update.events),
+                f"; {len(update.changes)} rating changes" if update.changes else "",
+            )
         if {"ready_check_started", "roster_changed", "timeout"} & events:
             text = ready_check_ping(update.snapshot, "ready_check_started" not in events)
             if text is not None:
@@ -199,6 +215,7 @@ class Lobby(commands.Cog):
             else:
                 return
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.edit_message(**self.message_kwargs(update.snapshot))
@@ -216,6 +233,7 @@ class Lobby(commands.Cog):
                 interaction.guild_id, interaction.channel_id, interaction.user.id
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(**self.message_kwargs(update.snapshot))
@@ -249,6 +267,7 @@ class Lobby(commands.Cog):
                 interaction.guild_id, interaction.channel_id, interaction.user.id, when, note
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(**self.message_kwargs(update.snapshot))
@@ -306,6 +325,7 @@ class Lobby(commands.Cog):
         try:
             update = await self.service.cancel(row.id, interaction.user.id, "cancelada")
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message("🛑 Lobby cancelada.", ephemeral=True)
@@ -394,6 +414,7 @@ class Lobby(commands.Cog):
         try:
             text = await action()
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(text, ephemeral=True, allowed_mentions=NO_MENTIONS)
@@ -505,6 +526,7 @@ class Lobby(commands.Cog):
                 interaction.guild_id, interaction.user.id
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         people = await self.service.players.repo.get_many([p.player_id for p in rows])
@@ -525,6 +547,7 @@ class Lobby(commands.Cog):
         try:
             update = await action()
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(done, ephemeral=True)
@@ -558,6 +581,7 @@ class Lobby(commands.Cog):
                 count, interaction.user.id, main_role.value if main_role else None
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         names = ", ".join(p.nickname for p in created)
@@ -577,6 +601,7 @@ class Lobby(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             result = await self.mock.fill(lobby_id, count, interaction.user.id)
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             send = interaction.followup if interaction.response.is_done() else None
             if send:
                 await send.send(str(exc), ephemeral=True)
@@ -596,6 +621,7 @@ class Lobby(commands.Cog):
         try:
             update = await self.mock.ready_all(await self._current_lobby(interaction, lobby))
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message("Jogadores de teste prontos.", ephemeral=True)
@@ -607,6 +633,7 @@ class Lobby(commands.Cog):
         try:
             update = await self.mock.drop_all(await self._current_lobby(interaction, lobby))
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message("Jogadores de teste saíram.", ephemeral=True)
@@ -629,6 +656,7 @@ class Lobby(commands.Cog):
                 await self._current_lobby(interaction, lobby), winner.value
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
@@ -645,6 +673,7 @@ class Lobby(commands.Cog):
         try:
             update = await self.mock.confirm(await self._current_lobby(interaction, lobby))
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
@@ -672,6 +701,7 @@ class Lobby(commands.Cog):
                 match, interaction.guild_id, interaction.user.id, validate
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         state = "validadas" if validate else "por validar"
@@ -685,6 +715,7 @@ class Lobby(commands.Cog):
         try:
             players = await self.mock.all_players()
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         lines = [await self.mock.describe(p) for p in players]
@@ -697,6 +728,7 @@ class Lobby(commands.Cog):
         try:
             removed = await self.mock.clear()
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(

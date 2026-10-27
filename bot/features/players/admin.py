@@ -15,6 +15,7 @@ from bot.features.players.choices import (
 )
 from bot.features.players.service import AlreadyRegisteredError, PlayerError, PlayerService
 from bot.features.ratings.service import Inspection, RatingError, RatingService
+from bot.interaction_log import log_refusal
 from bot.permissions import admin_only
 
 if TYPE_CHECKING:
@@ -83,6 +84,7 @@ class InhouseAdmin(commands.Cog):
                 member.id, display_name or member.display_name, registered_by=interaction.user.id
             )
         except AlreadyRegisteredError as exc:
+            log_refusal(interaction, exc)
             # Non-destructive: the existing profile, rating, ranks and roles are left as they were.
             await interaction.response.send_message(
                 f"ℹ️ {exc.player.nickname} já está registado. Nada foi alterado.",
@@ -91,6 +93,7 @@ class InhouseAdmin(commands.Cog):
             )
             return
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             hint = "" if display_name else " Indica um display_name."
             await interaction.response.send_message(
                 f"{exc}{hint}", ephemeral=True, allowed_mentions=NO_MENTIONS
@@ -119,6 +122,7 @@ class InhouseAdmin(commands.Cog):
             player = await self.players.require(user.id)
             stored = await self.ratings.adjust(player.id, mu, sigma, interaction.user.id, note)
         except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         log.info("Admin %s adjusted rating of player %s", interaction.user.id, player.id)
@@ -135,6 +139,7 @@ class InhouseAdmin(commands.Cog):
             player = await self.players.require(user.id)
             ins = await self.ratings.inspect(player.id)
         except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         label = (
@@ -175,6 +180,7 @@ class InhouseAdmin(commands.Cog):
                 interaction.user.id,
             )
         except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         text = f"Rank de referência: **{rank.label()}**." if rank else "Sem rank de referência."
@@ -198,6 +204,7 @@ class InhouseAdmin(commands.Cog):
                 user.id, role.value, proficiency.value or None
             )
         except PlayerError as exc:
+            log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         done = "limpa" if not proficiency.value else f"definida para {proficiency.value}/5"

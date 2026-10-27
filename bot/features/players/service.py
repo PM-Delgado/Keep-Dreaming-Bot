@@ -1,5 +1,6 @@
 """Roster rules: registration, role proficiency and the profile view model."""
 
+import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -19,6 +20,9 @@ from bot.features.ratings.service import RatingService
 NICKNAME_MIN, NICKNAME_MAX = 2, 24
 NOT_REGISTERED = "KD Scrims: Jogador não registado. Usa /register primeiro."
 CHAMPION_POOL_SIZE = 3  # champions shown from the player's ranked Solo/Duo games
+
+
+log = logging.getLogger(__name__)
 
 
 class PlayerError(Exception):
@@ -104,6 +108,13 @@ class PlayerService:
         except NicknameTaken:
             raise PlayerError(f"O nickname «{nickname}» já está em uso.") from None
         await self.ratings.ensure_default_seed(player.id, registered_by or discord_id)
+        log.info(
+            "Registered player %s %r (discord %s)%s",
+            player.id,
+            nickname,
+            discord_id,
+            " [mock]" if is_mock else "",
+        )
         return player
 
     async def require(self, discord_id: int) -> Player:

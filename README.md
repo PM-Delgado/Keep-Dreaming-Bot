@@ -21,6 +21,7 @@ rank that moves as games are played.
 - [The group's roster](#the-groups-roster)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
+- [Logs](#logs)
 - [Development](#development)
 - [Documentation](#documentation)
 - [Roadmap](#roadmap)
@@ -271,8 +272,16 @@ writes makes a backup copy next to the database, `*.sqlite3.bak-<time>-<reason>`
    icon ids always stay. `reset --keep-roster --yes` is the lighter version: it removes only the test
    games, lobbies, rating adjustments and mock players and keeps the roster (use it to replay `games`).
 
-   To prepare production: `reset --yes`, then `seed`, and do not run `games`. The database then holds
-   the fresh roster and the `/puta` data, nothing else.
+7. **Prepare the database for production.** `python -m bot.features.roster production` shows the
+   plan and changes nothing; with `--yes` it makes a backup and then, in one go: deletes all league
+   data (test games, lobbies, mock players, rating adjustments), **clears the daily `/puta` picks**,
+   seeds the roster again (links the Riot accounts, so it needs `RIOT_API_KEY`; `--no-riot` skips
+   them) and checks the result table by table. The `/puta` names and phrases are kept exactly as
+   they are (on an empty database they come from `bot/features/nameday/seed/*.json`), and so are
+   the champion list and icon ids. The check ends with `Ready.` or the `FAIL` lines to fix: integrity,
+   foreign keys, names and phrases present, no picks, every player of the file registered with a
+   rating and rank, no mock players, no games or lobbies, and the Riot accounts of the file linked.
+   Do not run `games` afterwards.
 
 The roster's own rows are dated just before the first test game (so the history can sit in the past);
 `games` refuses to run on a database that already has games, run `reset --keep-roster --yes` first. To pick a
@@ -327,10 +336,31 @@ Read once at startup from the environment or `.env` (`bot/config.py`).
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
 | `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis) in lobbies, `/match show`, `/profile` and `/riot history`; names are used where an icon is missing. `false` turns them off; see `docs/riot-policy.md`. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
+| `LOG_LEVEL` | no | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `LOG_DIR` | no | `logs` | Folder of the log file `kdbot.log` (a new file every midnight, 14 days kept). Empty: console only. |
 
 **Data.** Everything is in one SQLite file (plus `-wal` and `-shm` files while the bot runs). Back it
 up by copying the `data/` folder while the bot is stopped. Schema changes are versioned migrations
 in `bot/db.py` and are applied automatically; an applied migration is never edited.
+
+## Logs
+
+The bot writes the same lines to the console and to `logs/kdbot.log` (git-ignored; yesterday's
+file is `kdbot.log.<date>`). Each line is `date time LEVEL logger: message`.
+
+* **Startup:** the switches in effect (never a token or key), the database file, its schema
+  version and how many names, phrases, players, lobbies, games and champions it holds, each
+  migration, the seeds loaded into an empty `/puta`, each feature loaded, the command sync, and
+  `Ready` with the server name. Shutdown is logged too.
+* **Every command, button and form:**
+  `/lobby open by ana (123) in #scrims (456) [lobby_id=3] -> ok 84ms`. The outcome is `ok`,
+  `refused (reason)` when a rule said no, `denied` for a missing permission, or `error` with the
+  traceback. Buttons log when pressed, e.g. `button lobby:join ... on message 789`.
+* **What changed:** lobby events (`Lobby 5 (ready_check): ready_check_started, roster_changed`),
+  registrations, rank signals, the daily name pick, the lobby sweeper, Riot and champion refreshes.
+
+To follow it live: `Get-Content logs\kdbot.log -Wait -Tail 50` (PowerShell) or
+`tail -f logs/kdbot.log`. Warnings and errors: `Select-String -Path logs\kdbot.log -Pattern "WARNING|ERROR"`.
 
 ## Development
 

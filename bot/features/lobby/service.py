@@ -147,6 +147,7 @@ class LobbyService:
             raise PlayerError(
                 "Já existe uma lobby aberta neste servidor. Usa /lobby show."
             ) from None
+        log.info("Lobby %s opened in channel %s by discord %s", lobby.id, channel_id, discord_id)
         return await self.join_player(lobby.id, player)
 
     async def schedule(
@@ -172,6 +173,13 @@ class LobbyService:
         note = " ".join((note or "").split())[:100] or None
         lobby = await self.repo.create(
             guild_id, channel_id, "scheduled", discord_id, now, scheduled_for=when, note=note
+        )
+        log.info(
+            "Lobby %s scheduled for %s in channel %s by discord %s",
+            lobby.id,
+            when.isoformat(timespec="minutes"),
+            channel_id,
+            discord_id,
         )
         return await self.join_player(lobby.id, player)
 
