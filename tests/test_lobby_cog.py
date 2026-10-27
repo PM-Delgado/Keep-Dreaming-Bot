@@ -16,6 +16,7 @@ from bot.features.lobby.render import (
     band_text,
     build_list_embed,
     build_lobby_embed,
+    build_pending_embed,
     fit_note,
     ready_check_ping,
     result_summary,
@@ -128,6 +129,12 @@ async def env(db):
     return SimpleNamespace(stack=stack, channel=channel, bot=bot, cog=cog, mock=mock)
 
 
+def note_of(embed: discord.Embed) -> str | None:
+    """The small `-# ` line at the bottom of an embed's description (there are no footers)."""
+    lines = (embed.description or "").splitlines()
+    return next((x.removeprefix("-# ") for x in reversed(lines) if x.startswith("-# ")), None)
+
+
 def text_of(embed: discord.Embed) -> str:
     parts = [embed.title or "", embed.description or "", embed.footer.text or ""]
     for field in embed.fields:
@@ -153,7 +160,10 @@ async def test_open_posts_the_lobby_message_and_remembers_it(env):
     ix = FakeInteraction(1)
     await env.cog.open_lobby.callback(env.cog, ix)
     posted = ix.sent[0]
-    assert "In-house #1 · Aberta" in text_of(posted["embed"])
+    embed = posted["embed"]
+    assert (embed.description or "").startswith("# 🟢 Scrim #1 · Aberta")  # large heading
+    assert embed.title is None and embed.footer.text is None
+    assert "▰▱▱▱▱▱▱▱▱▱" in text_of(embed)  # 1 of 10 players, as a bar
     assert posted["view"] is not None
     lobby = await env.stack.lobbies.lobby_for_message(777)
     assert lobby is not None  # the message id is stored so buttons can find the lobby
@@ -168,7 +178,7 @@ async def test_open_twice_or_unregistered_is_an_ephemeral_error(env):
     assert "lobby" in ix.sent[0]["content"]
     ix = FakeInteraction(404)
     await env.cog.open_lobby.callback(env.cog, ix)
-    assert "não está registado" in ix.sent[0]["content"]
+    assert "não registado" in ix.sent[0]["content"]
     assert lobby_id == 1
 
 
@@ -191,7 +201,7 @@ async def test_cancel_command_is_for_creator_or_admin_and_updates_the_message(en
     assert "criador" in ix.sent[0]["content"]
     ix = FakeInteraction(ADMIN)
     await env.cog.cancel_lobby.callback(env.cog, ix)
-    assert ix.sent[0]["content"] == "Lobby cancelada."
+    assert ix.sent[0]["content"] == "🛑 Lobby cancelada."
     edit = env.channel.messages[777].edits[-1]
     assert "Cancelada" in text_of(edit["embed"])
     assert edit["view"] is None  # a closed lobby has no buttons
@@ -551,7 +561,7 @@ async def test_the_scheduled_embed_shows_the_time_the_note_and_the_sign_ups(env)
     lobby_id = await schedule_as(env, note="noite de flex")
     snap = await env.stack.lobbies.snapshot(lobby_id)
     text = text_of(build_lobby_embed(snap))
-    assert "Agendada" in text
+    assert "Agendado" in text
     assert "noite de flex" in text
     assert f"<t:{int(snap.lobby.scheduled_for.timestamp())}:F>" in text
     assert "Jogadores (1/10)" in text
@@ -577,7 +587,7 @@ async def test_list_shows_the_open_lobby_and_the_scheduled_ones(env):
     text = text_of(ix.sent[0]["embed"])
     assert "Aberta" in text
     assert "1/10" in text
-    assert text.count("#") == 2
+    assert text.count("**#") == 2  # the open lobby and the scheduled one
     assert "x" in text
 
 
@@ -589,7 +599,7 @@ async def test_show_and_cancel_accept_a_lobby_number(env):
     lobby_id = await schedule_as(env)
     ix = FakeInteraction(1)
     await env.cog.show_lobby.callback(env.cog, ix, lobby_id)
-    assert "Agendada" in text_of(ix.sent[0]["embed"])
+    assert "Agendado" in text_of(ix.sent[0]["embed"])
     ix = FakeInteraction(1)
     await env.cog.show_lobby.callback(env.cog, ix, 4242)
     assert "Não encontrei" in ix.sent[0]["content"]
@@ -774,10 +784,10 @@ async def test_match_show_lists_teams_and_history(env):
     await env.cog.match_show.callback(env.cog, ix, None)  # type: ignore[arg-type]
     text = text_of(ix.sent[0]["embed"])
     assert "Resultado por confirmar" in text
-    assert "Vencedor: **Azul**" in text
+    assert "**Azul** ganhou (por confirmar)" in text
     assert "Player 01" in text
     assert "Histórico" not in text and "reportou" not in text  # no audit trail in the embed
-    assert not ix.sent[0]["embed"].footer.text  # nothing confirmed yet
+    assert note_of(ix.sent[0]["embed"]) is None  # nothing confirmed yet
     ix = FakeInteraction(1)
     await env.cog.match_show.callback(env.cog, ix, 999)  # type: ignore[arg-type]
     assert "Não encontrei" in ix.sent[0]["content"]
@@ -793,7 +803,7 @@ async def test_match_fix_and_void_are_for_admins_and_update_the_message(env):
     blue = SimpleNamespace(value="red")
     ix = FakeInteraction(ADMIN)
     await env.cog.match_fix.callback(env.cog, ix, match.id, blue)  # type: ignore[arg-type]
-    assert ix.sent[0]["content"] == "Feito."
+    assert ix.sent[0]["content"].startswith(("✏️ Jogo #", "🚫 Jogo #"))
     assert "Vermelho ganhou" in text_of(env.channel.messages[777].edits[-1]["embed"])
     assert "corrigido" in env.channel.sent[0]["content"]
     ix = FakeInteraction(ADMIN)
@@ -801,7 +811,7 @@ async def test_match_fix_and_void_are_for_admins_and_update_the_message(env):
     assert "Lobby encerrada (erro de registo)" in text_of(
         env.channel.messages[777].edits[-1]["embed"]
     )
-    assert "anulada" in env.channel.sent[-1]["content"]
+    assert "anulado" in env.channel.sent[-1]["content"]
     ix = FakeInteraction(1)
     await env.cog.match_void.callback(env.cog, ix, match.id, "x")  # type: ignore[arg-type]
     assert "admin" in ix.sent[0]["content"] or "anulado" in ix.sent[0]["content"]
@@ -891,7 +901,7 @@ async def test_match_stats_records_pending_stats_and_match_show_marks_them(env):
     text = text_of(ix.sent[0]["embed"])
     assert "Kai'Sa 8/2/11 ⏳" in text
     assert "Histórico" not in text
-    assert ix.sent[0]["embed"].footer.text == (
+    assert note_of(ix.sent[0]["embed"]) == (
         f"Resultado confirmado por Player {ADMIN} · 1 por validar"
     )
     await env.stack.matches.validate_stats(ADMIN, match_id)
@@ -899,8 +909,8 @@ async def test_match_stats_records_pending_stats_and_match_show_marks_them(env):
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
     embed = ix.sent[0]["embed"]
     assert "Kai'Sa 8/2/11" in text_of(embed)
-    assert "⏳" not in text_of(embed) and "✅" not in text_of(embed)  # no marks: the footer says it
-    assert embed.footer.text == (
+    assert "⏳" not in text_of(embed) and "✅" not in text_of(embed)  # no marks: the note says it
+    assert note_of(embed) == (
         f"Resultado confirmado por Player {ADMIN} · KDAs validados por Player {ADMIN}"
     )
 
@@ -927,7 +937,7 @@ async def test_match_show_puts_the_champion_icon_next_to_the_player(env):
     embed = ix.sent[0]["embed"]
     assert " — <:champ_Kaisa:4242> 8/2/11 ⏳" in text_of(embed)
     assert "Kai'Sa" not in text_of(embed)  # the icon replaces the champion's name
-    assert "Riot" not in (embed.footer.text or "")  # the notice lives on /profile, not here
+    assert "Riot" not in (note_of(embed) or "")  # the notice lives on /profile, not here
 
     env.stack.champions.icons = False  # the switch hides them again
     ix = FakeInteraction(1)
@@ -942,7 +952,7 @@ async def test_match_stats_errors_are_private_and_explain_themselves(env):
     assert ix.sent[0]["ephemeral"] is True and "Não conheço" in ix.sent[0]["content"]
     ix = FakeInteraction(404)
     await env.cog.match_stats.callback(env.cog, ix, "Ahri", 1, 2, 3, match_id)  # type: ignore[arg-type]
-    assert "não está registado" in ix.sent[0]["content"]
+    assert "não registado" in ix.sent[0]["content"]
 
 
 async def test_the_champion_autocomplete_offers_the_matching_champions(env):
@@ -1014,7 +1024,7 @@ async def test_mock_players_can_enter_and_validate_stats_for_a_test_game(env):
     assert await env.stack.match_repo.get_by_lobby(lobby_id) is None
 
 
-async def test_the_footer_names_the_admins_who_validated_and_counts_what_is_left(env):
+async def test_the_note_names_the_admins_who_validated_and_counts_what_is_left(env):
     match_id, sides = await confirmed_game_with_admin(env)
     await env.stack.register(1, start=ADMIN - 1)  # a second admin
     env.stack.matches.is_admin = lambda user_id: user_id in (ADMIN, ADMIN - 1)
@@ -1025,7 +1035,7 @@ async def test_the_footer_names_the_admins_who_validated_and_counts_what_is_left
     await env.stack.matches.validate_stats(ADMIN - 1, match_id, blue[1])
     ix = FakeInteraction(1)
     await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
-    assert ix.sent[0]["embed"].footer.text == (
+    assert note_of(ix.sent[0]["embed"]) == (
         f"Resultado confirmado por Player {ADMIN} · "
         f"KDAs validados por Player {ADMIN - 1}, Player {ADMIN} · 1 por validar"
     )
@@ -1120,3 +1130,29 @@ def test_validation_footer_covers_every_state(env):
     assert validation_footer(base, "Ana", [], 3) == "Resultado confirmado por Ana · 3 por validar"
     for status in ("in_progress", "reported", "voided"):
         assert validation_footer(replace(base, status=status), "Ana", ["Ana"], 1) is None
+
+
+async def test_every_button_has_an_emoji_and_keeps_its_persistent_id(env):
+    view = LobbyView(env.cog, None)
+    assert all(item.emoji is not None for item in view.children)  # type: ignore[attr-defined]
+    assert {item.custom_id for item in view.children} == {  # type: ignore[attr-defined]
+        f"lobby:{action}" for action in ACTIONS
+    }
+
+
+async def test_a_confirmed_game_takes_the_winning_sides_colour(env):
+    match_id, _ = await confirmed_game_with_admin(env)
+    ix = FakeInteraction(1)
+    await env.cog.match_show.callback(env.cog, ix, match_id)  # type: ignore[arg-type]
+    embed = ix.sent[0]["embed"]
+    assert (embed.description or "").startswith(f"# 🏆 Jogo #{match_id} · Confirmado")
+    assert embed.color in (discord.Color.blue(), discord.Color.red())
+    assert embed.title is None and embed.footer.text is None
+
+
+def test_the_pending_list_and_the_empty_lobby_list_have_headings_and_a_friendly_empty_state():
+    pending = build_pending_embed([(3, "Ana", "Kai'Sa 8/2/11")])
+    assert (pending.description or "").startswith("# ⏳ Stats por validar")
+    assert "-# Valida com /match validate" in (pending.description or "")
+    assert "Tudo em dia" in (build_pending_embed([]).description or "")
+    assert (build_list_embed(None, []).description or "").startswith("# 📋 Scrims")

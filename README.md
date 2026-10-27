@@ -90,24 +90,24 @@ every error message is private). Commands marked *admin* need your Discord user 
 
 | Command | Reply | What it does |
 |---|---|---|
-| `/register <nickname>` | private | Join the in-house roster (2-24 characters, unique). Starts at a default rating until you give a rank. |
-| `/profile view [user]` | public | In-house rank (or placement progress `n/5`), League reference rank, linked Riot accounts, role proficiency with icons. |
+| `/register <nickname>` | private | Join the Scrims roster (2-24 characters, unique). Starts at a default rating until you give a rank. |
+| `/profile view [user]` | public | Nickname (large) with the Discord avatar and a side bar in the colour of the player's League Solo/Duo tier; *Scrims* (`Rank:` with a progress bar or placement `n/5`, record and win rate, `KDA:` over all validated games); *Win Rate Scrims* (icon and `2V/0D` for all five roles, `0V/0D` where there are no games); *Campeões Scrims* (top 5 role + champion, validated stats); *Roles* (icon and proficiency); and last the League reference: *Rank League*, *Contas Riot* (★ = main) and *Campeões Solo/Duo* (icons of the top 3 of the stored ranked games). No footer. A player who is not registered gets a private error. |
 | `/profile roles <role> <proficiency>` | private | Set how comfortable you are (1-5) on a role, or `Limpar` to clear it. |
 | `/profile rank <tier> [division]` | private | Report your League Solo/Duo rank; it seeds your starting rating while you have few games. |
-| `/history [user]` | public | The last 10 confirmed games: result, side, role, champion and KDA (validated stats only; pending ones show "stats por validar"). The header has the overall record. |
-| `/stats [user]` | public | Overall record, win rate and KDA; per role; top 5 champions and champion x role (validated stats only). Every figure shows its number of games. |
-| `/leaderboard [board]` | public | `board` is *Rank do grupo* (default: players past placement, by tier and division with a progress bar toward the next division; inside a division the fuller bar ranks higher; KD esports, the top step, shows a full bar), *Taxa de vitórias* or *KDA* (both need 5 games; KDA counts validated games; equal scores share a position, A-Z). Ratings are never shown as numbers. |
+| `/history [user]` | public | Large heading `Histórico · Name` with the Discord avatar and a side bar in the player's League tier colour; `Jogos: 10V 8D (56%) · 18 jogos`, then the last 10 confirmed games: result, role, champion and KDA (validated stats only; pending ones show "stats por validar"). No footer. Not registered: the same private error as `/profile view`. |
+| `/stats [user]` | public | Same look as `/profile view` and `/history` (large heading, avatar, tier-coloured side bar, no footer): `Jogos:` and `KDA:` lines, *Por role* (all five roles, `0V 0D` where there are no games), *Campeões Scrims* (top 5) and *Campeões Scrims por role* (role, champion; validated stats only). Not registered: the same private error as `/profile view`. |
+| `/leaderboard [board]` | public | `board` is *Rank Scrims* (default: players past placement, by tier and division with a progress bar toward the next division; inside a division the fuller bar ranks higher; KD esports, the top step, shows a full bar), *Win Rate Scrims* or *KDA Scrims* (both need 5 games; KDA counts validated games; equal scores share a position, A-Z). Same look as the profile: large heading with an emoji, a one-line rule (`n jogadores · mín. 5 jogos`), 🥇🥈🥉 on the podium, the leader's Discord avatar as the picture, a colour per board (gold, green, red), no footer. Ratings are never shown as numbers. |
 
 ### Lobbies and games
 
 | Command | Reply | What it does |
 |---|---|---|
-| `/lobby open` | public | Open the server's in-house lobby in this channel (a live message with buttons). |
+| `/lobby open` | public | Open the server's Scrim lobby in this channel (a live message with buttons and a progress bar of the 10 places). |
 | `/lobby schedule <when> [note]` | public | Schedule a lobby (Lisbon time, e.g. `21:00`, `21h30`, `amanhã 21:00`, `sexta 21:00`, `15/08 21:00`, `2026-08-15 21:00`). A reminder goes out 30 minutes before. |
-| `/lobby list` | public | The open lobby and the scheduled ones. |
+| `/lobby list` | public | Heading `📋 Scrims`, then the open lobby and the scheduled ones (status emoji each); a friendly message when there are none. |
 | `/lobby show [lobby]` | public | Re-post a lobby message here (the stale copy is removed). |
 | `/lobby cancel [lobby]` | private | Cancel a lobby (its creator or an admin). |
-| `/match show [match]` | public | A game's status, teams, roles, champions and KDA (⏳ = pending); the footer says who confirmed the result and who validated the KDAs. Default: the latest game. |
+| `/match show [match]` | public | Large heading `🏆 Jogo #n · Confirmado`, the winner, teams (role icon, name, champion icon, KDA, ⏳ = pending); a confirmed game takes the winning side's colour; a small line at the bottom says who confirmed the result and who validated the KDAs. Default: the latest game. |
 | `/match stats <champion> <kills> <deaths> <assists> [match]` | private | Record your own champion (autocomplete) and KDA (0-99) for a confirmed game; default: your latest game without validated stats. Waits for an admin to validate it. |
 | `/match void <match> [reason]` | private + channel notice | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
 | `/match fix <match> <winner>` | private + channel notice | *Admin.* Correct a confirmed result or decide a pending or contested one. |
@@ -115,7 +115,7 @@ every error message is private). Commands marked *admin* need your Discord user 
 | `/match validate <match> [member]` | private | *Admin.* Validate the pending stats of a game (of one player, or of everybody). |
 | `/match pending` | private | *Admin.* List the stats waiting for validation, oldest game first. |
 
-The lobby message carries the buttons: **Entrar**, **Sair**, **Pronto**, **Recusar**, **Confirmar**
+The lobby message carries the buttons (each with an emoji): **Entrar**, **Sair**, **Pronto**, **Recusar**, **Confirmar**
 (teams), **Azul ganhou** / **Vermelho ganhou**, **Confirmar resultado**, **Contestar** and
 **Cancelar**. Only the buttons that make sense for the current state are shown. When a result is
 confirmed, corrected or voided the bot also posts a summary in the channel (winner, promotions,
@@ -130,9 +130,9 @@ Without the key every `/riot` command answers that the integration is disabled.
 | `/riot link <riot_id> [platform] [player]` | private | Link a Riot account (`Name#TAG`; the platform defaults to `RIOT_DEFAULT_PLATFORM`). The first becomes the main. Shows the consent notice. Only admins may use `player`. |
 | `/riot main <riot_id> [player]` | private | Choose which account supplies the rank. |
 | `/riot unlink <riot_id> [player]` | private | Remove an account and all data tied to it. |
-| `/riot list [player]` | public | List linked accounts (visible to everyone). |
+| `/riot list [player]` | public | Large heading `Contas Riot · Name` with the avatar and the tier-coloured side bar; one line per account (★ = main, games stored, last sync); no footer. |
 | `/riot refresh [player]` | private | Refresh names, rank and ranked history (10 minute cooldown for players; admins skip it). |
-| `/riot history [player] [riot_id]` | public | Last ten ranked Solo/Duo games: result, champion and role (icons), KDA, CS, duration. |
+| `/riot history [player] [riot_id]` | public | Heading `Solo/Duo · Name` with the avatar and tier colour, `Jogos: 6V 4D (60%) · KDA: 3.25`, then the last ten ranked Solo/Duo games (result, champion and role icons, KDA, CS, duration); a small line says when it was last synced. |
 
 ### Admin
 
@@ -203,26 +203,26 @@ When you are done, `python -m bot.features.roster reset --keep-roster --yes` rem
 
 | Try | Expect |
 |---|---|
-| `/register Ana` | Private: "Registado como **Ana**! Define as tuas roles com /profile roles e o teu rank com /profile rank." A second `/register`, or a nickname already taken: a private error. |
-| `/profile roles role:Mid proficiency:5` | Private: "Proficiência em **Mid** definida para 5/5." (`Limpar`: "limpa"). |
-| `/profile rank tier:Gold division:II` | Private: "Rank de referência: **Gold II**. Serve só como ponto de partida; ..." |
-| `/profile view` | Public embed: *Rank do grupo* (tier, division and a progress bar toward the next division, full on the top step; or "Sem rank (colocação n/5)"), *Rank League (referência)*, Riot accounts if any, *Roles* with icons; the footer says the rank is internal and carries the Riot notice. |
-| `/lobby open` | Public lobby message "In-house #n · Aberta" with buttons. A second open: a private error. |
+| `/register Ana` | Private: "🎉 Bem-vindo aos Scrims, **Ana**! Define as tuas roles com `/profile roles` e o teu rank com `/profile rank`." A second `/register`, or a nickname already taken: a private error. |
+| `/profile roles role:Mid proficiency:5` | Private: "✅ <Mid icon>: 5/5." (`Limpar`: "🧹 <icon>: limpa."). |
+| `/profile rank tier:Gold division:II` | Private: "✅ Rank de referência: **Gold II**. Serve só como ponto de partida; ..." |
+| `/profile view` | Public embed: the nickname as a large heading with the Discord avatar, the side bar coloured by the League Solo/Duo tier (blurple without a rank); *Scrims* (`Rank:` tier, division and a progress bar toward the next division, full on the top step, or "Sem rank (colocação n/5)"; record, win rate, `KDA: 4.84 (6.4/3.7/11.5)`), *Win Rate Scrims* (`icon 2V/0D` for all five roles, `0V/0D` where there are no games), *Campeões Scrims* (`role champion 2V 0D · KDA`), *Roles* (icon and `n/5`, the name only where there is no icon), then *Rank League*, *Contas Riot* and *Campeões Solo/Duo* (icons only) when there is data; no footer. Not registered: private "KD Scrims: Jogador não registado. Usa /register primeiro." |
+| `/lobby open` | Public lobby message "🟢 Scrim #n · Aberta" (large heading, places bar, buttons with emojis). A second open: a private error. |
 | `/mock fill`, `/mock ready`, then **Pronto** | Ready-check ping, then balanced teams (Azul/Vermelho) with a role icon per player and no ratings shown. |
 | **Confirmar**, then `/mock report winner:Azul` | "Resultado por confirmar"; **Confirmar resultado** / **Contestar** appear for the other team. As an admin your confirm is final at once; otherwise use `/mock confirm`. |
-| After the result | Public summary: "🏆 In-house #n: **Azul ganhou**", 🎯 finished placement / 📈 / 📉 lines, "Em colocação: ..." and the `/match stats` hint. |
-| `/match stats champion:Ahri kills:8 deaths:2 assists:11` | Private: "Jogo #n: **Ahri 8/2/11** registado. Falta um admin validar." |
-| `/match show` | Public embed: teams with `<role icon> Name — <champion icon> 8/2/11`, ⏳ while pending, footer "Resultado confirmado por X · KDAs validados por Y · N por validar". |
-| `/match pending`, then `/match validate match:n` | Private list "Stats por validar"; then "Jogo #n: k stats validadas." |
+| After the result | Public summary: "🏆 Scrim #n: **Azul ganhou**!", 🎯 finished placement / 📈 / 📉 lines, "Em colocação: ..." and the `/match stats` hint. |
+| `/match stats champion:Ahri kills:8 deaths:2 assists:11` | Private: "📝 Jogo #n: **Ahri 8/2/11** registado. Falta um admin validar ⏳" |
+| `/match show` | Public embed: teams with `<role icon> Name — <champion icon> 8/2/11`, ⏳ while pending, bottom line "Resultado confirmado por X · KDAs validados por Y · N por validar". |
+| `/match pending`, then `/match validate match:n` | Private list "⏳ Stats por validar" ("Tudo em dia! 🎉" when empty); then "✅ Jogo #n: k stats validadas." |
 | `/match set match:n member:@x champion:Zed kills:1 deaths:2 assists:3 role:Top` | Private confirmation; the stats are validated at once and the played role shows. |
-| `/match fix match:n winner:Vermelho`, `/match void match:n reason:teste` | Private "Feito." plus a channel summary ("✏️ Resultado ... corrigido" / "🚫 In-house #n anulada (teste)"); ratings follow. |
-| `/history`, `/stats`, `/leaderboard board:...` | The public embeds described in the Players table. A brand-new player: "Ainda não há jogos confirmados."; boards without enough games: "Ainda ninguém tem 5 jogos." / "Ainda ninguém terminou a colocação." |
-| `/lobby schedule when:amanhã 21:00 note:teste`, `/lobby list`, `/lobby cancel` | Public "Agendada" message; the list shows both lobbies; cancel answers privately "Lobby cancelada." |
+| `/match fix match:n winner:Vermelho`, `/match void match:n reason:teste` | Private "✏️ Jogo #n: **Vermelho** ganhou." / "🚫 Jogo #n anulado." plus a channel summary ("✏️ Resultado ... corrigido" / "🚫 Scrim #n anulado (teste)"); ratings follow. |
+| `/history`, `/stats`, `/leaderboard board:...` | The public embeds described in the Players table (no footer on any of them). A brand-new player: "Ainda não há jogos confirmados."; boards without enough games: "Ainda ninguém tem 5 jogos." / "Ainda ninguém terminou a colocação." |
+| `/lobby schedule when:amanhã 21:00 note:teste`, `/lobby list`, `/lobby cancel` | Public "📅 Scrim #n · Agendado" message; the list shows both lobbies; cancel answers privately "🛑 Lobby cancelada." |
 | `/riot link riot_id:Nome#TAG` (needs the key) | Private summary plus the consent notice; `/riot list` and `/riot history` answer publicly. |
 | `/admin rating inspect user:@x` | Private embed with H, R and E (raw numbers; the only place they appear). |
-| `/admin rating set`, `/admin rating rank`, `/admin roles set`, `/admin rating recompute` | Private one-line confirmations; "Ratings reconstruídos." for recompute. |
-| `/sync` | Private: "Sincronizados n comandos." (bot owner only; anyone else is refused). |
-| A non-admin running an admin command | Private: "Não tens permissão para usar este comando." An unexpected failure: "Ocorreu um erro inesperado. Tenta novamente mais tarde." |
+| `/admin rating set`, `/admin rating rank`, `/admin roles set`, `/admin rating recompute` | Private one-line confirmations; "🔄 Ratings reconstruídos." for recompute. |
+| `/sync` | Private: "🔄 Sincronizados n comandos." (bot owner only; anyone else is refused). |
+| A non-admin running an admin command | Private: "⛔ Não tens permissão para usar este comando." An unexpected failure: "💥 Ocorreu um erro inesperado. Tenta novamente mais tarde." |
 | `/puta`, `/putaindor` | Public name-of-the-day embeds ("Ainda não há ranking; usa /puta para começar." before any pick). |
 
 ## The group's roster

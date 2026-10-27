@@ -178,9 +178,9 @@ def test_summary_ignores_remakes_for_kda_but_counts_them():
     assert (summary.games, summary.wins, summary.losses, summary.remakes) == (3, 1, 1, 1)
     assert summary.kda == pytest.approx((10 + 10 + 2 + 4) / (2 + 6))
     text = format_summary(summary)
-    assert "1V 1D" in text
+    assert "Jogos: 1V 1D (50%)" in text
     assert "1 remake" in text
-    assert "3.25" in text
+    assert "KDA: 3.25" in text
     assert summarize([]).kda == 0
 
 
@@ -249,7 +249,7 @@ async def test_history_merges_accounts_and_can_be_limited_to_one(stack, world):
 async def test_history_error_messages(stack, world):
     with pytest.raises(PlayerError, match="não tem contas"):
         await stack.riot.recent_history(1)
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await stack.riot.recent_history(404)
     await stack.riot.link(1, "Alpha#EUW", None, 99)
     await stack.riot.wait_for_background()  # synced, but there are no games
@@ -306,13 +306,15 @@ async def test_history_command_is_public_and_shows_ten_games(stack, world, cog):
     reply = ix.sent[0]
     assert "ephemeral" not in reply  # the group can see it
     embed = reply["embed"]
-    assert embed.title == "Últimos 10 jogos ranked Solo/Duo de Ana"
-    lines = embed.description.split("\n\n")[1].split("\n")
+    assert embed.description.startswith("# Solo/Duo · Ana")
+    assert embed.thumbnail.url == "https://cdn.invalid/a.png"
+    lines = embed.description.split("\n\n")[2].split("\n")
     assert len(lines) == 10
     assert all("**Jinx**" in line and "ADC" in line and "8/2/6 (7.0 KDA)" in line for line in lines)
-    assert embed.description.startswith("**6V 4D**")
-    assert "Guardado no último sync" in embed.footer.text
-    assert "/riot refresh" in embed.footer.text
+    assert "Jogos: 6V 4D (60%)" in embed.description
+    assert embed.footer.text is None  # the sync note is a small line in the description
+    assert "-# Guardado no último sync" in embed.description
+    assert "/riot refresh" in embed.description
 
 
 async def test_history_command_defaults_to_yourself_and_reports_problems_privately(stack, cog):
@@ -322,7 +324,7 @@ async def test_history_command_defaults_to_yourself_and_reports_problems_private
     assert "não tem contas" in ix.sent[0]["content"]
     ix = FakeInteraction(1)
     await cog.history.callback(cog, ix, member(404), None)  # type: ignore[arg-type]
-    assert "não está registado" in ix.sent[0]["content"]
+    assert "não registado" in ix.sent[0]["content"]
 
 
 async def test_history_embed_shows_the_account_when_games_come_from_several(stack, world):
@@ -335,7 +337,7 @@ async def test_history_embed_shows_the_account_when_games_come_from_several(stac
     assert "*Alpha#EUW*" in (both.description or "")
     assert "*Beta#EUW*" in (both.description or "")
     one = build_history_embed(await stack.riot.recent_history(1, riot_id="Beta#EUW"), NOW)
-    assert "(Beta#EUW)" in (one.title or "")
+    assert "· Beta#EUW" in (one.description or "").splitlines()[0]  # the heading names it
     assert "*Alpha#EUW*" not in (one.description or "")
 
 
@@ -430,7 +432,7 @@ async def test_history_embed_uses_icons_and_display_names_from_the_maps(stack, w
         champion_icons={"MonkeyKing": "<:champ_MonkeyKing:7>"},
         role_icons={"MID": "<:role_mid:8>"},
     )
-    lines = (embed.description or "").split("\n\n")[1].split("\n")
+    lines = (embed.description or "").split("\n\n")[2].split("\n")
     wukong = next(line for line in lines if "champ_MonkeyKing" in line)
     assert "<:champ_MonkeyKing:7> <:role_mid:8>" in wukong
     ahri = next(line for line in lines if "Ahri" in line)

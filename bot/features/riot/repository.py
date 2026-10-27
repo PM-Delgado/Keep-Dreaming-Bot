@@ -272,6 +272,17 @@ class RiotRepository:
             for r in rows
         ]
 
+    async def champion_pool(self, player_id: int, limit: int) -> list[tuple[str, int]]:
+        """(champion, games) of the stored ranked games across the accounts, most played first."""
+        async with self.db.conn.execute(
+            "SELECT g.champion, COUNT(*) AS n FROM riot_role_games g"
+            " JOIN riot_accounts a ON a.id = g.riot_account_id"
+            " WHERE a.player_id = ? AND g.champion IS NOT NULL"
+            " GROUP BY g.champion ORDER BY n DESC, g.champion LIMIT ?",
+            (player_id, limit),
+        ) as cur:
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
     async def observations(
         self, player_id: int, now: datetime, window_days: int, per_account: int
     ) -> list[GameObservation]:

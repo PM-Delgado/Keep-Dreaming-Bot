@@ -57,6 +57,7 @@ class Stack:
         self.ratings.main_puuid_of = self.riot.main_puuid_of
         self.players.role_estimator = self.riot.role_estimates
         self.players.account_labeler = self.riot.account_labels
+        self.players.champion_pooler = self.riot.champion_pool
         self.lobby_repo = LobbyRepository(db)
         self.match_repo = MatchRepository(db)
         self.ratings.matches_source = self.match_repo.confirmed_for_replay

@@ -20,18 +20,18 @@ if TYPE_CHECKING:
     from bot.features.lobby.cog import Lobby
     from bot.features.lobby.service import LobbySnapshot
 
-# action -> (label, style)
-ACTIONS: dict[str, tuple[str, discord.ButtonStyle]] = {
-    "join": ("Entrar", discord.ButtonStyle.success),
-    "leave": ("Sair", discord.ButtonStyle.secondary),
-    "ready": ("Pronto", discord.ButtonStyle.success),
-    "decline": ("Recusar", discord.ButtonStyle.danger),
-    "confirm": ("Confirmar", discord.ButtonStyle.success),
-    "cancel": ("Cancelar", discord.ButtonStyle.danger),
-    "report_blue": ("Azul ganhou", discord.ButtonStyle.primary),
-    "report_red": ("Vermelho ganhou", discord.ButtonStyle.danger),
-    "confirm_result": ("Confirmar resultado", discord.ButtonStyle.success),
-    "contest": ("Contestar", discord.ButtonStyle.secondary),
+# action -> (emoji, label, style)
+ACTIONS: dict[str, tuple[str, str, discord.ButtonStyle]] = {
+    "join": ("🎮", "Entrar", discord.ButtonStyle.success),
+    "leave": ("🚪", "Sair", discord.ButtonStyle.secondary),
+    "ready": ("✅", "Pronto", discord.ButtonStyle.success),
+    "decline": ("✖️", "Recusar", discord.ButtonStyle.danger),
+    "confirm": ("🤝", "Confirmar", discord.ButtonStyle.success),
+    "cancel": ("🛑", "Cancelar", discord.ButtonStyle.danger),
+    "report_blue": ("🔵", "Azul ganhou", discord.ButtonStyle.primary),
+    "report_red": ("🔴", "Vermelho ganhou", discord.ButtonStyle.danger),
+    "confirm_result": ("🏆", "Confirmar resultado", discord.ButtonStyle.success),
+    "contest": ("⚠️", "Contestar", discord.ButtonStyle.secondary),
 }
 # A started game has sub-states that depend on its match, not only on the lobby status.
 REPORTED, CONTESTED = "REPORTED", "CONTESTED"
@@ -56,8 +56,8 @@ def state_of(snapshot: "LobbySnapshot") -> str:
 
 class ActionButton(discord.ui.Button["LobbyView"]):
     def __init__(self, cog: "Lobby", action: str) -> None:
-        label, style = ACTIONS[action]
-        super().__init__(label=label, style=style, custom_id=f"lobby:{action}")
+        emoji, label, style = ACTIONS[action]
+        super().__init__(label=label, emoji=emoji, style=style, custom_id=f"lobby:{action}")
         self.cog = cog
         self.action = action
 

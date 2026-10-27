@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from bot.features.players.proficiency import ROLES, EffectiveProficiency, effective_proficiency
@@ -17,6 +17,8 @@ from bot.features.ratings.rank import RankResolution
 from bot.features.ratings.service import RatingService
 
 NICKNAME_MIN, NICKNAME_MAX = 2, 24
+NOT_REGISTERED = "KD Scrims: Jogador não registado. Usa /register primeiro."
+CHAMPION_POOL_SIZE = 3  # champions shown from the player's ranked Solo/Duo games
 
 
 class PlayerError(Exception):
@@ -61,6 +63,7 @@ class Profile:
     rank_stale: bool
     roles: list[RoleLine]
     accounts: list[str]  # linked Riot accounts, visible to the group
+    champion_pool: list[tuple[str, int]] = field(default_factory=list)  # (champion id, games)
 
 
 class PlayerService:
@@ -73,9 +76,10 @@ class PlayerService:
         self.repo = repo
         self.ratings = ratings
         self.clock = clock
-        # Hooks set by the optional Riot module; absent means "no estimates, no accounts".
+        # Hooks set by the optional Riot module; absent means "no estimates, no accounts, no pool".
         self.role_estimator: Callable[[int], Awaitable[Mapping[str, int | None]]] | None = None
         self.account_labeler: Callable[[int], Awaitable[list[str]]] | None = None
+        self.champion_pooler: Callable[[int, int], Awaitable[list[tuple[str, int]]]] | None = None
 
     async def register(
         self,
@@ -105,7 +109,7 @@ class PlayerService:
     async def require(self, discord_id: int) -> Player:
         player = await self.repo.get_by_discord(discord_id)
         if player is None or player.left_at is not None:
-            raise PlayerError("Esse jogador não está registado. Usa /register primeiro.")
+            raise PlayerError(NOT_REGISTERED)
         return player
 
     async def set_declared(self, discord_id: int, role: str, value: int | None) -> Player:
@@ -142,6 +146,11 @@ class PlayerService:
         inspection = await self.ratings.inspect(player.id)
         lines = await self.role_lines(player.id)
         accounts = await self.account_labeler(player.id) if self.account_labeler else []
+        pool = (
+            await self.champion_pooler(player.id, CHAMPION_POOL_SIZE)
+            if self.champion_pooler
+            else []
+        )
         return Profile(
             player,
             inspection.standing,
@@ -150,6 +159,7 @@ class PlayerService:
             inspection.rank_stale,
             lines,
             accounts,
+            pool,
         )
 
 

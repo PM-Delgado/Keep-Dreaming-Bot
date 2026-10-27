@@ -31,7 +31,7 @@ from bot.features.matches.repository import (
     ParticipantRow,
 )
 from bot.features.players.proficiency import ROLE_NAMES_PT, ROLES
-from bot.features.players.service import PlayerError, PlayerService
+from bot.features.players.service import NOT_REGISTERED, PlayerError, PlayerService
 from bot.features.ratings.repository import StoredRating
 from bot.features.ratings.service import RatingService
 
@@ -338,7 +338,7 @@ class MatchService:
             raise PlayerError("Só um admin pode definir stats.")
         target = await self.players.repo.get_by_discord(target_discord_id)
         if target is None:
-            raise PlayerError("Esse jogador não está registado.")
+            raise PlayerError(NOT_REGISTERED)
         if played_role is not None and played_role not in ROLES:
             raise PlayerError("Role inválida.")
         _check_kda(kills, deaths, assists)
@@ -397,7 +397,7 @@ class MatchService:
         if target_discord_id is not None:
             target = await self.players.repo.get_by_discord(target_discord_id)
             if target is None:
-                raise PlayerError("Esse jogador não está registado.")
+                raise PlayerError(NOT_REGISTERED)
             target_id = target.id
         now = self.clock()
         results = []

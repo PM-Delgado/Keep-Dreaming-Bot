@@ -44,7 +44,7 @@ async def test_duplicate_registration_and_nickname_are_rejected_case_insensitive
 
 
 async def test_unregistered_players_are_rejected(players):
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await players.require(404)
 
 

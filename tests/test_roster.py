@@ -179,7 +179,7 @@ async def test_seed_registers_everyone_with_rank_roles_and_riot_accounts(db: Dat
     assert report.problems == []
     profile = await stack.players.profile(ADMIN)
     assert [line.role for line in profile.roles if line.proficiency.value == 5] == ["MID"]
-    assert profile.accounts == ["Amigo00#EUW (EUW1) ★"]
+    assert profile.accounts == ["Amigo00#EUW ★"]
     rank = profile.resolution.rank
     assert rank is not None
     assert (rank.tier, rank.division) == ("DIAMOND", "IV")

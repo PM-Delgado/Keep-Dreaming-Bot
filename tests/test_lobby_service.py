@@ -54,10 +54,10 @@ async def test_one_open_lobby_per_server_but_other_servers_are_independent(stack
 
 async def test_unregistered_or_busy_players_cannot_open_or_join(stack):
     await stack.register(2)
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await stack.lobbies.open(GUILD, CHANNEL, 404)
     first = await stack.lobbies.open(GUILD, CHANNEL, 1)
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await stack.lobbies.join(first.snapshot.lobby.id, 404)
     second = await stack.lobbies.open(GUILD + 1, CHANNEL, 2)
     with pytest.raises(PlayerError, match="outra lobby"):

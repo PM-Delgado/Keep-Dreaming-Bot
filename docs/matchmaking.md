@@ -104,8 +104,7 @@ The visible rank is derived from **H** (not E, not R), so it reflects performanc
 * **Promotion** happens at the division floor. **Demotion** only after H falls `0.33` below the
   current division's floor, so a player on the boundary does not flicker.
 * The profile and the group leaderboard show a progress bar inside the division (full on the top
-  step), never a number; the leaderboard orders players inside a division by it. The footer says the rank is
-  internal and not a League rank.
+  step), never a number; the leaderboard orders players inside a division by it.
 * After each confirmed game the channel gets a summary listing promotions, demotions, finished
   placements and placement progress (no ratings).
 

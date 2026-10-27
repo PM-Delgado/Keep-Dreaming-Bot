@@ -149,5 +149,7 @@ def format_line(
 
 
 def format_summary(summary: HistorySummary) -> str:
+    played = summary.wins + summary.losses
+    percent = f"{summary.wins / played * 100:.0f}%" if played else "—"
     remakes = f" · {summary.remakes} remake(s)" if summary.remakes else ""
-    return f"**{summary.wins}V {summary.losses}D**{remakes} · KDA médio {summary.kda:.2f}"
+    return f"Jogos: {summary.wins}V {summary.losses}D ({percent}){remakes} · KDA: {summary.kda:.2f}"

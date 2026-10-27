@@ -16,6 +16,7 @@ from discord.ext import commands
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
 from bot.features.players.service import PlayerError
+from bot.features.players.text import tier_color
 from bot.features.ratings.service import RatingError
 from bot.features.riot.client import RiotClient
 from bot.features.riot.history import format_ago, format_line, format_summary, summarize, to_entry
@@ -51,32 +52,33 @@ def rank_text(outcome: RankOutcome | None) -> str:
 
 def link_summary(result: LinkResult) -> str:
     role = "principal" if result.is_main else "secundária"
-    account = result.account
-    base = f"Conta **{account.riot_id}** ({account.platform.upper()}) ligada como {role}."
+    star = "⭐" if result.is_main else "🔗"
+    base = f"{star} Conta **{result.account.riot_id}** ligada como {role}."
     sync = " O histórico ranked está a ser sincronizado em segundo plano."
     return base + rank_text(result.rank) + sync
 
 
 def build_list_embed(
-    nickname: str, rows: list[tuple[AccountRow, int]], now: datetime
+    nickname: str,
+    rows: list[tuple[AccountRow, int]],
+    now: datetime,
+    avatar_url: str | None = None,
+    color: discord.Color | None = None,
 ) -> discord.Embed:
-    lines = []
+    """Same look as the profile: large heading, avatar, tier colour, ★ after the main account."""
+    lines = [f"# Contas Riot · {discord.utils.escape_markdown(nickname)}", ""]
     for account, games in rows:
-        star = "★ " if account.is_main else ""
+        star = " ★" if account.is_main else ""
         if account.history_synced_at is None:
             synced = "a sincronizar"
         else:
             synced = f"sincronizado há {(now - account.history_synced_at).days} d"
-        lines.append(
-            f"{star}**{account.riot_id}** ({account.platform.upper()})"
-            f" · {games} jogos ranked · {synced}"
-        )
-    embed = discord.Embed(
-        title=f"Contas Riot de {nickname}",
-        description="\n".join(lines) or "Nenhuma conta ligada.",
-        color=discord.Color.dark_teal(),
-    )
-    embed.set_footer(text="★ = conta principal (usada para o rank de referência).")
+        lines.append(f"**{account.riot_id}**{star} · {games} jogos ranked · {synced}")
+    if not rows:
+        lines.append("Nenhuma conta ligada. Usa `/riot link` para ligar a tua.")
+    embed = discord.Embed(description="\n".join(lines), color=color or discord.Color.blurple())
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     return embed
 
 
@@ -86,6 +88,8 @@ def build_history_embed(
     champion_names: Mapping[str, str] | None = None,
     champion_icons: Mapping[str, str] | None = None,
     role_icons: Mapping[str, str] | None = None,
+    avatar_url: str | None = None,
+    color: discord.Color | None = None,
 ) -> discord.Embed:
     """Presentation of /riot history. Restyle here; the numbers come from history.py.
 
@@ -103,20 +107,23 @@ def build_history_embed(
         )
         for e in entries
     ]
-    scope = f" ({view.account.riot_id})" if view.account else ""
-    embed = discord.Embed(
-        title=f"Últimos {len(entries)} jogos ranked Solo/Duo de {view.nickname}{scope}",
-        description=f"{format_summary(summarize(entries))}\n\n" + "\n".join(lines),
-        color=discord.Color.blurple(),
-    )
+    scope = f" · {view.account.riot_id}" if view.account else ""
     if view.last_synced is None:
-        footer = "O histórico ainda está a sincronizar; pode estar incompleto."
+        note = "O histórico ainda está a sincronizar; pode estar incompleto."
     else:
-        footer = (
+        note = (
             f"Guardado no último sync ({format_ago(view.last_synced, now)}). "
             "Usa /riot refresh para atualizar."
         )
-    embed.set_footer(text=footer)
+    heading = f"# Solo/Duo · {discord.utils.escape_markdown(view.nickname)}{scope}"
+    embed = discord.Embed(
+        description="\n".join(
+            [heading, "", format_summary(summarize(entries)), "", *lines, "", f"-# {note}"]
+        ),
+        color=color or discord.Color.blurple(),
+    )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     return embed
 
 
@@ -138,6 +145,10 @@ class Riot(commands.Cog):
     async def cog_unload(self) -> None:
         if self.service.client is not None:
             await self.service.client.close()
+
+    async def _color(self, player_id: int) -> discord.Color:
+        """The side bar has the colour of the player's League Solo/Duo tier, as on the profile."""
+        return tier_color((await self.service.ratings.resolve(player_id)).rank)
 
     def _target(self, interaction: discord.Interaction, member: discord.Member | None) -> int:
         """Players manage their own accounts; admins can manage anyone's."""
@@ -215,7 +226,8 @@ class Riot(commands.Cog):
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         await interaction.followup.send(
-            f"**{account.riot_id}** é agora a conta principal.{rank_text(outcome)}", ephemeral=True
+            f"⭐ **{account.riot_id}** é agora a conta principal.{rank_text(outcome)}",
+            ephemeral=True,
         )
 
     @riot.command(name="unlink", description="Remove uma conta ligada e os dados dela.")
@@ -232,7 +244,7 @@ class Riot(commands.Cog):
         except (PlayerError, RatingError) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
-        text = f"Conta **{result.removed.riot_id}** removida, com o histórico e os ranks dela."
+        text = f"🗑️ Conta **{result.removed.riot_id}** removida, com o histórico e os ranks dela."
         if result.new_main is not None:
             text += (
                 f" **{result.new_main.riot_id}** é agora a conta principal."
@@ -255,7 +267,13 @@ class Riot(commands.Cog):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
-            embed=build_list_embed(profile_player.nickname, rows, datetime.now(UTC)),
+            embed=build_list_embed(
+                profile_player.nickname,
+                rows,
+                datetime.now(UTC),
+                target.display_avatar.url,
+                await self._color(profile_player.id),
+            ),
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
@@ -304,6 +322,8 @@ class Riot(commands.Cog):
                 names,
                 icons,
                 self.icons.markup() if self.icons else None,
+                target.display_avatar.url,
+                await self._color((await self.service.players.require(target.id)).id),
             ),
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -323,7 +343,7 @@ class Riot(commands.Cog):
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         await interaction.followup.send(
-            f"Atualizado.{rank_text(outcome)} O histórico ranked continua em segundo plano.",
+            f"🔄 Atualizado.{rank_text(outcome)} O histórico ranked continua em segundo plano.",
             ephemeral=True,
         )
 
@@ -349,6 +369,7 @@ async def setup(bot: "KDBot") -> None:
     players_cog.ratings.main_puuid_of = service.main_puuid_of
     players_cog.players.role_estimator = service.role_estimates
     players_cog.players.account_labeler = service.account_labels
+    players_cog.players.champion_pooler = service.champion_pool
     await bot.add_cog(
         Riot(
             bot,

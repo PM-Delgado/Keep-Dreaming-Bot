@@ -5,13 +5,13 @@ ratings feature has no commands of its own.
 """
 
 import logging
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
 from bot.features.players.admin import InhouseAdmin
 from bot.features.players.choices import (
@@ -20,68 +20,17 @@ from bot.features.players.choices import (
     ROLE_CHOICES,
     TIER_CHOICES,
 )
-from bot.features.players.proficiency import ROLE_NAMES_PT
+from bot.features.players.profile_embed import build_profile_embed
 from bot.features.players.repository import PlayerRepository
-from bot.features.players.service import PlayerError, PlayerService, Profile
-from bot.features.ratings.ladder import LadderConfig
+from bot.features.players.service import NOT_REGISTERED, PlayerError, PlayerService
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingError, RatingService
-from bot.features.riot.legal import RIOT_NOTICE
 
 if TYPE_CHECKING:
     from bot.app import KDBot
+    from bot.features.stats.service import StatsService
 
 log = logging.getLogger(__name__)
-
-FOOTER = f"Rank interno do grupo: não equivale a um rank do League of Legends.\n{RIOT_NOTICE}"
-SOURCE_PT = {"admin": "definido por admin", "declared": "declarado", "estimated": "estimado"}
-
-
-def progress_bar(progress: float | None, width: int = 10) -> str:
-    if progress is None:
-        return ""
-    filled = round(progress * width)
-    return "▰" * filled + "▱" * (width - filled)
-
-
-def in_house_rank_text(profile: Profile, ladder: LadderConfig) -> str:
-    standing = profile.standing
-    if not standing.placed:
-        return f"Sem rank (colocação {standing.games}/{ladder.placement_games})"
-    label = ladder.label(standing.tier_key or "", standing.division)
-    # The top step has nothing to climb to: it shows a full bar instead of none.
-    bar = progress_bar(1.0 if standing.progress is None else standing.progress)
-    return f"{label} {bar}".strip()
-
-
-def league_rank_text(profile: Profile) -> str:
-    rank = profile.resolution.rank
-    if rank is None:
-        return "(a aguardar atualização)" if profile.resolution.riot_pending else "—"
-    if rank.source == "riot":
-        age = f"há {int(profile.rank_age_days or 0)} d"
-        stale = ", desatualizado" if profile.rank_stale else ""
-        return f"Riot Solo/Duo: {rank.label()} ({age}{stale})"
-    return f"{rank.label()} ({SOURCE_PT.get(rank.source, 'declarado')})"
-
-
-def build_profile_embed(
-    profile: Profile, ladder: LadderConfig, roles: Mapping[str, str] | None = None
-) -> discord.Embed:
-    embed = discord.Embed(title=profile.player.nickname, color=discord.Color.blurple())
-    embed.add_field(name="Rank do grupo", value=in_house_rank_text(profile, ladder), inline=False)
-    embed.add_field(name="Rank League (referência)", value=league_rank_text(profile), inline=False)
-    if profile.accounts:
-        embed.add_field(name="Contas Riot", value="\n".join(profile.accounts), inline=False)
-    lines = []
-    for line in profile.roles:
-        value = line.proficiency.value
-        text = "—" if value is None else f"{value}/5 ({SOURCE_PT[line.proficiency.source]})"
-        icon = (roles or {}).get(line.role)
-        lines.append(f"{icon + ' ' if icon else ''}**{ROLE_NAMES_PT[line.role]}**: {text}")
-    embed.add_field(name="Roles", value="\n".join(lines), inline=False)
-    embed.set_footer(text=FOOTER)
-    return embed
 
 
 class Players(commands.Cog):
@@ -96,11 +45,14 @@ class Players(commands.Cog):
         self.players = players
         self.ratings = ratings
         self.icons = icons  # role icons; None or empty means role names only
+        # Set by the stats extension (loaded after this one): in-house numbers and champion icons.
+        self.stats: StatsService | None = None
+        self.champions: ChampionService | None = None
 
-    profile = app_commands.Group(name="profile", description="O teu perfil in-house.")
+    profile = app_commands.Group(name="profile", description="O teu perfil de Scrims.")
 
-    @app_commands.command(name="register", description="Regista-te nos in-houses.")
-    @app_commands.describe(nickname="O nome que aparece nos in-houses (2 a 24 caracteres).")
+    @app_commands.command(name="register", description="Regista-te nos Scrims.")
+    @app_commands.describe(nickname="O nome que aparece nos Scrims (2 a 24 caracteres).")
     async def register(self, interaction: discord.Interaction, nickname: str) -> None:
         try:
             player = await self.players.register(interaction.user.id, nickname)
@@ -108,25 +60,43 @@ class Players(commands.Cog):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(
-            f"Registado como **{discord.utils.escape_markdown(player.nickname)}**! "
-            "Define as tuas roles com /profile roles e o teu rank com /profile rank.",
+            f"🎉 Bem-vindo aos Scrims, **{discord.utils.escape_markdown(player.nickname)}**! "
+            "Define as tuas roles com `/profile roles` e o teu rank com `/profile rank`.",
             ephemeral=True,
         )
 
-    @profile.command(name="view", description="Mostra um perfil in-house.")
+    @profile.command(name="view", description="Mostra um perfil de Scrims.")
     @app_commands.describe(user="De quem queres ver o perfil (por defeito, o teu).")
     async def view(self, interaction: discord.Interaction, user: discord.Member | None = None):
         target = user or interaction.user
         try:
             profile = await self.players.profile(target.id)
-        except (PlayerError, RatingError) as exc:
+        except PlayerError:
+            await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
+            return
+        except RatingError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+        stats = None
+        if self.stats is not None and interaction.guild_id is not None:
+            stats = await self.stats.stats(interaction.guild_id, target.id)
+        ids = {champion for champion, _ in profile.champion_pool}
+        if stats is not None:
+            ids |= {b.key[0] for b in stats.by_champion}
+        ids = sorted(ids)
+        icons = await self.champions.icon_markup(ids) if self.champions else {}
+        names = await self.champions.names(ids) if self.champions else {}
+        embed = build_profile_embed(
+            profile,
+            self.ratings.ladder,
+            self.icons.markup() if self.icons else None,
+            stats,
+            icons,
+            names,
+            target.display_avatar.url,
+        )
         await interaction.response.send_message(
-            embed=build_profile_embed(
-                profile, self.ratings.ladder, self.icons.markup() if self.icons else None
-            ),
-            allowed_mentions=discord.AllowedMentions.none(),
+            embed=embed, allowed_mentions=discord.AllowedMentions.none()
         )
 
     @profile.command(name="roles", description="Define o quão à vontade estás numa role.")
@@ -145,10 +115,9 @@ class Players(commands.Cog):
         except PlayerError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        done = "limpa" if value is None else f"definida para {value}/5"
-        await interaction.response.send_message(
-            f"Proficiência em **{role.name}** {done}.", ephemeral=True
-        )
+        icon = (self.icons.markup() if self.icons else {}).get(role.value) or f"**{role.name}**"
+        done = "🧹 {role}: limpa." if value is None else "✅ {role}: {value}/5."
+        await interaction.response.send_message(done.format(role=icon, value=value), ephemeral=True)
 
     @profile.command(name="rank", description="Diz-nos o teu rank de Solo/Duo no League.")
     @app_commands.describe(tier="O teu tier.", division="A divisão (ignorada em Master+).")
@@ -169,8 +138,8 @@ class Players(commands.Cog):
             return
         label = rank.label() if rank else tier.name
         await interaction.response.send_message(
-            f"Rank de referência: **{label}**. Serve só como ponto de partida; "
-            "o rank do grupo vem dos jogos in-house.",
+            f"✅ Rank de referência: **{label}**. Serve só como ponto de partida; "
+            "o rank dos Scrims vem dos jogos.",
             ephemeral=True,
         )
 

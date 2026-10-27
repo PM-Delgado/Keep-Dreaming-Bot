@@ -242,7 +242,7 @@ async def test_set_rules(stack):
         await stack.matches.set_stats(ADMIN, match_id, blue[0])
     with pytest.raises(PlayerError, match="Role inválida"):
         await stack.matches.set_stats(ADMIN, match_id, blue[0], played_role="CARRY")
-    with pytest.raises(PlayerError, match="não está registado"):
+    with pytest.raises(PlayerError, match="não registado"):
         await stack.matches.set_stats(ADMIN, match_id, 4242, "Ahri", 1, 2, 3)
     await stack.register(1, start=60)
     with pytest.raises(PlayerError, match="não jogou"):

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import discord
@@ -7,18 +8,17 @@ from discord import app_commands
 from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
 from bot.features.players.admin import InhouseAdmin, build_inspection_embed
-from bot.features.players.cog import (
-    Players,
-    build_profile_embed,
-    in_house_rank_text,
-    progress_bar,
-)
+from bot.features.players.cog import Players
+from bot.features.players.profile_embed import build_profile_embed, in_house_rank_text
 from bot.features.players.repository import PlayerRepository
-from bot.features.players.service import PlayerService
+from bot.features.players.service import NOT_REGISTERED, PlayerService
+from bot.features.players.text import progress_bar
 from bot.features.ratings.ladder import DEFAULT_LADDER, Standing
 from bot.features.ratings.params import MatchmakingParams
 from bot.features.ratings.repository import RatingRepository
 from bot.features.ratings.service import RatingService
+from bot.features.stats.repository import StatsRepository
+from bot.features.stats.service import Breakdown, Kda, PlayerStats, StatsService, Tally
 
 ENV = {
     "DISCORD_TOKEN": "t",
@@ -53,7 +53,7 @@ async def stack(db):
 
 
 def embed_text(embed: discord.Embed) -> str:
-    parts = [embed.title or "", embed.footer.text or ""]
+    parts = [embed.title or "", embed.description or "", embed.footer.text or ""]
     for field in embed.fields:
         parts += [field.name or "", field.value or ""]
     return "\n".join(parts)
@@ -71,7 +71,7 @@ async def test_register_command_replies_ephemerally_and_rejects_duplicates(stack
     first = fake_interaction(1)
     await players_cog.register.callback(players_cog, first, "Ana")
     assert first.response.sent[0]["ephemeral"] is True
-    assert "Registado" in first.response.sent[0]["content"]
+    assert "Bem-vindo aos Scrims" in first.response.sent[0]["content"]
     second = fake_interaction(1)
     await players_cog.register.callback(players_cog, second, "Ana2")
     assert "Já estás registado" in second.response.sent[0]["content"]
@@ -94,11 +94,11 @@ async def test_profile_embed_shows_group_rank_but_no_raw_numbers(stack):
     await players.set_declared(1, "MID", 4)
     embed = build_profile_embed(await players.profile(1), DEFAULT_LADDER)
     text = embed_text(embed)
+    assert "# Ana" in text  # the nickname, large
     assert "Sem rank (colocação 0/5)" in text  # no in-house games yet: not a League rank
-    assert "Gold II (declarado)" in text
-    assert "**Mid**: 4/5 (declarado)" in text
-    assert "não equivale a um rank do League" in text
-    assert "isn't endorsed by Riot Games" in text
+    assert "Gold II" in text and "declarado" not in text  # the League rank, no source label
+    assert "Mid 4/5" in text  # no icons given: the role's name stands in
+    assert embed.footer.text is None  # no internal-rank note, no Riot notice
     assert "25.2" not in text  # mu of Gold II must never be shown to normal players
     assert "6.5" not in text  # nor sigma
     assert "sigma" not in text.lower()
@@ -110,7 +110,22 @@ async def test_profile_view_for_unregistered_user_is_a_polite_ephemeral(stack):
     member = SimpleNamespace(id=404)
     await players_cog.view.callback(players_cog, ix, member)
     assert ix.response.sent[0]["ephemeral"] is True
-    assert "não está registado" in ix.response.sent[0]["content"]
+    assert ix.response.sent[0]["content"] == NOT_REGISTERED
+    assert NOT_REGISTERED == "KD Scrims: Jogador não registado. Usa /register primeiro."
+
+
+async def test_profile_view_sends_a_public_embed_with_the_avatar_and_the_in_house_numbers(stack):
+    players_cog, _, players, ratings = stack
+    await players.register(1, "Ana")
+    players_cog.stats = StatsService(StatsRepository(players.repo.db), players, ratings)
+    ix = fake_interaction(1)
+    ix.guild_id = 123
+    member = SimpleNamespace(id=1, display_avatar=SimpleNamespace(url="https://cdn.invalid/a.png"))
+    await players_cog.view.callback(players_cog, ix, member)
+    sent = ix.response.sent[0]
+    assert "ephemeral" not in sent
+    assert sent["embed"].thumbnail.url == "https://cdn.invalid/a.png"
+    assert sent["embed"].fields[0].name == "Scrims"
 
 
 async def test_inspection_embed_is_the_only_place_with_raw_numbers(stack):
@@ -217,7 +232,7 @@ async def test_admin_register_of_an_existing_player_changes_nothing(stack):
         await admin_cog.player_register.callback(admin_cog, ix, fake_member(8, "Novo"), name)
         reply = ix.response.sent[0]
         assert reply["ephemeral"] is True
-        assert reply["content"] == "Original já está registado. Nada foi alterado."
+        assert reply["content"] == "ℹ️ Original já está registado. Nada foi alterado."
     assert await snapshot() == before
 
 
@@ -257,14 +272,74 @@ async def test_admin_register_is_denied_for_non_admins():
         await bot.db.close()
 
 
-async def test_profile_roles_get_their_icon_in_front_when_it_exists(stack):
+async def test_profile_roles_show_the_icon_alone_when_it_exists(stack):
     _, _, players, _ = stack
     await players.register(1, "Ana")
     await players.set_declared(1, "MID", 4)
     profile = await players.profile(1)
     plain = embed_text(build_profile_embed(profile, DEFAULT_LADDER))
-    assert "<:role_mid" not in plain and "**Mid**: 4/5 (declarado)" in plain
-    icons = {"MID": "<:role_mid:8>"}
-    text = embed_text(build_profile_embed(profile, DEFAULT_LADDER, icons))
-    assert "<:role_mid:8> **Mid**: 4/5 (declarado)" in text
-    assert "**Top**: —" in text  # no icon for Top: just the name, as before
+    assert "<:role_mid" not in plain and "Mid 4/5" in plain
+    text = embed_text(build_profile_embed(profile, DEFAULT_LADDER, {"MID": "<:role_mid:8>"}))
+    assert "<:role_mid:8> 4/5" in text and "Mid" not in text
+    assert "Top —" in text  # no icon for Top: its name stands in
+
+
+async def test_profile_shows_in_house_numbers_champions_and_the_solo_pool_with_the_avatar(stack):
+    _, _, players, _ = stack
+    await players.register(1, "Ana")
+    profile = await players.profile(1)
+    profile = replace(profile, champion_pool=[("Ahri", 7), ("Zed", 2)])
+    kda = Kda(2, 10, 4, 14)
+    champion = Breakdown(("Ahri", "MID"), Tally(2, 0), kda)
+    by_role = [Breakdown(("TOP",), Tally(1, 1), None), Breakdown(("MID",), Tally(2, 0), kda)]
+    stats = PlayerStats(
+        profile.player, Tally(3, 1), kda, 0, by_role=by_role, by_champion_role=[champion]
+    )
+    embed = build_profile_embed(
+        profile,
+        DEFAULT_LADDER,
+        {"MID": "<:role_mid:8>"},
+        stats,
+        {"Ahri": "<:Ahri:1>"},
+        {"Zed": "Zed"},
+        "https://cdn.invalid/a.png",
+    )
+    fields = {f.name: f.value or "" for f in embed.fields}
+    assert list(fields)[:4] == ["Scrims", "Win Rate Scrims", "Campeões Scrims", "Roles"]
+    assert list(fields)[-2:] == ["Rank League", "Campeões Solo/Duo"]  # League last
+    assert fields["Scrims"].splitlines()[0].startswith("Rank: Sem rank")
+    assert "Jogos: 3V 1D (75%) · 4 jogos" in fields["Scrims"]
+    assert fields["Scrims"].endswith("KDA: 6.00 (5.0/2.0/7.0)")  # no "em n jogos"
+    assert fields["Win Rate Scrims"] == (
+        "Top 1V/1D · Jungle 0V/0D · <:role_mid:8> 2V/0D · ADC 0V/0D · Suporte 0V/0D"
+    )  # always the five roles, in the usual order
+    assert fields["Campeões Scrims"] == "<:role_mid:8> <:Ahri:1> 2V 0D · KDA 6.00"
+    assert fields["Campeões Solo/Duo"] == "<:Ahri:1> **Zed**"  # icons only, no counts
+    assert embed.thumbnail.url == "https://cdn.invalid/a.png"
+
+
+async def test_the_side_bar_has_the_colour_of_the_league_tier(stack):
+    _, _, players, ratings = stack
+    await players.register(1, "Ana")
+    none = build_profile_embed(await players.profile(1), DEFAULT_LADDER)
+    assert none.color == discord.Color.blurple()  # no League rank yet
+    player = await players.require(1)
+    await ratings.set_self_reported_rank(player.id, "DIAMOND", "I", 1)
+    diamond = build_profile_embed(await players.profile(1), DEFAULT_LADDER)
+    assert diamond.color == discord.Color(0x576BCE)
+    await ratings.set_self_reported_rank(player.id, "MASTER", None, 1)
+    master = build_profile_embed(await players.profile(1), DEFAULT_LADDER)
+    assert master.color == discord.Color(0x9D5CC9)
+
+
+async def test_profile_roles_replies_with_the_role_icon_and_clears_with_a_broom(stack):
+    players_cog, _, players, _ = stack
+    await players.register(1, "Ana")
+    players_cog.icons = SimpleNamespace(markup=lambda: {"MID": "<:role_mid:8>"})  # type: ignore[assignment]
+    mid, top = SimpleNamespace(value="MID", name="Mid"), SimpleNamespace(value="TOP", name="Top")
+    ix = fake_interaction(1)
+    await players_cog.roles.callback(players_cog, ix, mid, SimpleNamespace(value=4))
+    assert ix.response.sent[0]["content"] == "✅ <:role_mid:8>: 4/5."
+    ix = fake_interaction(1)
+    await players_cog.roles.callback(players_cog, ix, top, SimpleNamespace(value=0))
+    assert ix.response.sent[0]["content"] == "🧹 **Top**: limpa."  # no icon: the name stands in

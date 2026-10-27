@@ -56,10 +56,10 @@ class KDBot(commands.Bot):
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
         if isinstance(error, app_commands.CheckFailure):
-            message = "Não tens permissão para usar este comando."
+            message = "⛔ Não tens permissão para usar este comando."
         else:
             log.error("Unhandled error in command %s", interaction.command, exc_info=error)
-            message = "Ocorreu um erro inesperado. Tenta novamente mais tarde."
+            message = "💥 Ocorreu um erro inesperado. Tenta novamente mais tarde."
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)
         else:
