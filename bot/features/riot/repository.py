@@ -54,6 +54,7 @@ class StoredGame:
     damage: int | None
     gold: int | None
     vision_score: int | None
+    is_main: bool = False  # played on the player's main account
 
 
 _COLUMNS = (
@@ -142,6 +143,12 @@ class RiotRepository:
             f"SELECT {_COLUMNS} FROM riot_accounts WHERE history_synced_at IS NULL ORDER BY id"
         ) as cur:
             return [_account(r) for r in await cur.fetchall()]
+
+    async def player_ids_with_accounts(self) -> list[int]:
+        async with self.db.conn.execute(
+            "SELECT DISTINCT player_id FROM riot_accounts ORDER BY player_id"
+        ) as cur:
+            return [r[0] for r in await cur.fetchall()]
 
     async def main_puuid(self, player_id: int) -> str | None:
         async with self.db.conn.execute(
@@ -238,7 +245,8 @@ class RiotRepository:
         sql = (
             "SELECT g.riot_match_id, a.game_name, a.tag_line, g.played_at, g.team_position,"
             " g.individual_position, g.win, g.kills, g.deaths, g.assists, g.duration_s,"
-            " g.early_surrender, g.champion, g.cs, g.damage, g.gold, g.vision_score"
+            " g.early_surrender, g.champion, g.cs, g.damage, g.gold, g.vision_score,"
+            " a.is_main"
             " FROM riot_role_games g JOIN riot_accounts a ON a.id = g.riot_account_id"
             " WHERE a.player_id = ?"
         )
@@ -268,6 +276,7 @@ class RiotRepository:
                 damage=r[14],
                 gold=r[15],
                 vision_score=r[16],
+                is_main=bool(r[17]),
             )
             for r in rows
         ]

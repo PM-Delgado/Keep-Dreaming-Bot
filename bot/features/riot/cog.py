@@ -4,14 +4,15 @@ Optional module: without RIOT_API_KEY the commands answer that the integration i
 rest of the bot (manual ranks, proficiency, ratings) is unaffected.
 """
 
+import asyncio
 import logging
-from collections.abc import Mapping
-from datetime import UTC, datetime
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
@@ -101,7 +102,6 @@ def build_history_embed(
         format_line(
             e,
             now,
-            show_account=view.multiple_accounts,
             champion_icon=(champion_icons or {}).get(e.champion, ""),
             role_icon=(role_icons or {}).get(e.role or "", ""),
             champion_name=(champion_names or {}).get(e.champion),
@@ -112,10 +112,7 @@ def build_history_embed(
     if view.last_synced is None:
         note = "O histórico ainda está a sincronizar; pode estar incompleto."
     else:
-        note = (
-            f"Guardado no último sync ({format_ago(view.last_synced, now)}). "
-            "Usa /riot refresh para atualizar."
-        )
+        note = f"Última atualização: {format_ago(view.last_synced, now)}."
     heading = f"# Solo/Duo · {discord.utils.escape_markdown(view.nickname)}{scope}"
     embed = discord.Embed(
         description="\n".join(
@@ -126,6 +123,55 @@ def build_history_embed(
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
     return embed
+
+
+REFRESH_HOURS = 6  # the timer that refreshes every linked account (a restart does not run it)
+KEY_LOG_EVERY = timedelta(hours=1)
+KEY_DM_EVERY = timedelta(hours=24)
+KEY_ALERT = (
+    "⚠️ A Riot rejeitou a chave da API (`RIOT_API_KEY`). Enquanto não for corrigida, a "
+    "atualização automática de ranks e histórico não funciona e o `/riot` falha. "
+    "Verifica a chave no Railway. (Só te aviso uma vez por dia.)"
+)
+
+
+class KeyAlert:
+    """Told every time Riot rejects the key: logs it (at most hourly) and messages the admins
+    (at most daily), so an expired or revoked key does not silently freeze the data."""
+
+    def __init__(
+        self, bot: "KDBot", clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ) -> None:
+        self.bot = bot
+        self.clock = clock
+        self._logged: datetime | None = None
+        self._messaged: datetime | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    def rejected(self) -> None:
+        now = self.clock()
+        if self._logged is None or now - self._logged >= KEY_LOG_EVERY:
+            self._logged = now
+            log.warning("Riot rejected the API key: lookups fail until it is fixed.")
+        if self._messaged is None or now - self._messaged >= KEY_DM_EVERY:
+            self._messaged = now
+            try:
+                task = asyncio.get_running_loop().create_task(self._message_admins())
+            except RuntimeError:  # no event loop: nothing can be sent
+                return
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _message_admins(self) -> None:
+        for admin_id in sorted(self.bot.settings.admin_ids):
+            try:
+                user = await self.bot.fetch_user(admin_id)
+                await user.send(KEY_ALERT)
+                log.info("Told admin %s that Riot rejected the API key.", admin_id)
+            except discord.HTTPException as exc:  # DMs closed, unknown user, ...
+                log.warning(
+                    "Could not message admin %s about the Riot key: %s", admin_id, exc.status
+                )
 
 
 class Riot(commands.Cog):
@@ -143,9 +189,26 @@ class Riot(commands.Cog):
 
     riot = app_commands.Group(name="riot", description="Contas Riot ligadas aos jogadores.")
 
+    async def cog_load(self) -> None:
+        self.refresher.start()
+
     async def cog_unload(self) -> None:
+        self.refresher.cancel()
         if self.service.client is not None:
             await self.service.client.close()
+
+    @tasks.loop(hours=REFRESH_HOURS)
+    async def refresher(self) -> None:
+        if self.refresher.current_loop == 0:
+            return  # a restart is not a reason to ask Riot again; profiles and lobbies refresh
+        try:
+            await self.service.refresh_all()
+        except Exception:
+            log.exception("Riot refresh cycle crashed")
+
+    @refresher.before_loop
+    async def _before_refresher(self) -> None:
+        await self.bot.wait_until_ready()
 
     async def _color(self, player_id: int) -> discord.Color:
         """The side bar has the colour of the player's League Solo/Duo tier, as on the profile."""
@@ -201,16 +264,14 @@ class Riot(commands.Cog):
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         log.info("Riot account %s linked to player of user %s", result.account.id, target)
-        await interaction.followup.send(
-            f"{link_summary(result)}\n\n{CONSENT_NOTICE}", ephemeral=True
-        )
-        if target != interaction.user.id:
-            # Linked on someone's behalf: tell the channel so the owner sees it and can unlink.
+        if target == interaction.user.id:
             await interaction.followup.send(
-                f"<@{target}>: um admin ligou a conta **{result.account.riot_id}** ao teu perfil.\n"
-                f"{CONSENT_NOTICE}\nSe não concordas, usa /riot unlink.",
-                allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=target)]),
+                f"{link_summary(result)}\n\n{CONSENT_NOTICE}", ephemeral=True
             )
+        else:
+            # An admin linking for someone has that person's consent already: no notice, and
+            # nothing is posted in the channel or sent to them.
+            await interaction.followup.send(link_summary(result), ephemeral=True)
 
     @riot.command(name="main", description="Define a conta principal (usada para o rank).")
     @app_commands.describe(riot_id="Uma das contas ligadas.", player="Só admins.")
@@ -358,7 +419,11 @@ async def setup(bot: "KDBot") -> None:
     if not isinstance(players_cog, Players):
         raise RuntimeError("bot.features.players.cog must be loaded before bot.features.riot.cog")
     settings = bot.settings
-    client = RiotClient(settings.riot_api_key) if settings.riot_api_key else None
+    client = (
+        RiotClient(settings.riot_api_key, on_auth_error=KeyAlert(bot).rejected)
+        if settings.riot_api_key
+        else None
+    )
     if client is None:
         log.info("RIOT_API_KEY is not set: the Riot integration is disabled.")
     service = RiotService(
@@ -373,6 +438,8 @@ async def setup(bot: "KDBot") -> None:
     players_cog.players.role_estimator = service.role_estimates
     players_cog.players.account_labeler = service.account_labels
     players_cog.players.champion_pooler = service.champion_pool
+    players_cog.players.view_refresh_due = service.view_refresh_due
+    players_cog.players.view_refresher = service.refresh_for_view
     await bot.add_cog(
         Riot(
             bot,

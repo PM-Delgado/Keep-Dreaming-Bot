@@ -6,7 +6,8 @@ clear message, while everything already stored (and every manual alternative) ke
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Callable, Coroutine, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -34,6 +35,13 @@ from bot.features.riot.roles import (
 )
 
 log = logging.getLogger(__name__)
+
+# Automatic refresh (see `refresh_for_view`, `spawn_rank_refresh`, `refresh_all`).
+VIEW_MAX_AGE = timedelta(minutes=30)  # /profile view refreshes a player checked longer ago
+TEAMS_MAX_AGE = timedelta(minutes=60)  # a ready-check refreshes the ranks of its ten players
+HISTORY_MAX_AGE = timedelta(hours=6)  # ranked history is re-synced (in the background) after this
+VIEW_WAIT_S = 4.0  # a command waits this long for Riot, then shows what is saved
+SAME_RANK_STORED_EVERY = timedelta(days=1)  # an unchanged rank is saved again at most this often
 
 CONSENT_NOTICE = (
     "**Dados da Riot: o que acontece**\n"
@@ -98,7 +106,6 @@ class HistoryView:
     games: list[StoredGame]
     last_synced: datetime | None  # the oldest sync among the accounts shown; None = unfinished
     account: AccountRow | None  # set when one account was asked for
-    multiple_accounts: bool  # games come from several accounts: show which one each is from
 
 
 @dataclass(frozen=True)
@@ -123,6 +130,10 @@ class RiotService:
         clock: Callable[[], datetime] = _utcnow,
         history: RoleHistoryParams | None = None,
         refresh_cooldown: timedelta = timedelta(minutes=10),
+        view_max_age: timedelta = VIEW_MAX_AGE,
+        teams_max_age: timedelta = TEAMS_MAX_AGE,
+        history_max_age: timedelta = HISTORY_MAX_AGE,
+        view_wait_s: float = VIEW_WAIT_S,
     ) -> None:
         self.repo = repo
         self.ratings = ratings
@@ -132,7 +143,13 @@ class RiotService:
         self.clock = clock
         self.history = history or RoleHistoryParams()
         self.refresh_cooldown = refresh_cooldown
-        self._last_refresh: dict[int, datetime] = {}
+        self.view_max_age = view_max_age
+        self.teams_max_age = teams_max_age
+        self.history_max_age = history_max_age
+        self.view_wait_s = view_wait_s
+        self._last_refresh: dict[int, datetime] = {}  # manual /riot refresh (its cooldown)
+        self._last_checked: dict[int, datetime] = {}  # any successful rank check, automatic or not
+        self._inflight: dict[int, asyncio.Task[None]] = {}  # automatic refresh running per player
         self._syncing: set[int] = set()
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -271,7 +288,6 @@ class RiotService:
             games=games,
             last_synced=oldest_sync,
             account=chosen,
-            multiple_accounts=len(accounts) > 1 and chosen is None,
         )
 
     async def main_puuid_of(self, player_id: int) -> str | None:
@@ -279,21 +295,38 @@ class RiotService:
 
     # --- rank ----------------------------------------------------------------------------
 
-    async def refresh_rank(self, player_id: int, triggered_by: int | None) -> RankOutcome:
+    async def refresh_rank(
+        self, player_id: int, triggered_by: int | None, background: bool = False
+    ) -> RankOutcome:
         """Look up the main account's Solo/Duo rank and record it. A failed lookup records
         nothing (so it can never supersede a good signal) and raises."""
+        try:
+            return await self._record_rank(player_id, triggered_by, background)
+        except RiotError as exc:
+            raise user_error(exc) from exc
+
+    async def _record_rank(
+        self, player_id: int, triggered_by: int | None, background: bool
+    ) -> RankOutcome:
+        """`refresh_rank` without turning Riot errors into player messages."""
         client = self._client()
         accounts = await self.repo.list_accounts(player_id)
         main = next((a for a in accounts if a.is_main), None)
         if main is None:
             raise PlayerError("Este jogador não tem conta principal.")
-        try:
-            rank: SoloRank | None = await client.solo_rank(main.puuid, main.platform)
-        except RiotError as exc:
-            raise user_error(exc) from exc
+        rank: SoloRank | None = await client.solo_rank(
+            main.puuid, main.platform, background=background
+        )
         if rank is None:
             await self.ratings.record_rank_signal(
-                player_id, "riot", "unranked", None, None, triggered_by, account_key=main.puuid
+                player_id,
+                "riot",
+                "unranked",
+                None,
+                None,
+                triggered_by,
+                account_key=main.puuid,
+                unchanged_for=SAME_RANK_STORED_EVERY,
             )
             return RankOutcome("unranked")
         await self.ratings.record_rank_signal(
@@ -304,6 +337,7 @@ class RiotService:
             rank.division,
             triggered_by,
             account_key=main.puuid,
+            unchanged_for=SAME_RANK_STORED_EVERY,
         )
         resolved = (await self.ratings.resolve(player_id)).rank
         return RankOutcome("ranked", resolved.label() if resolved else rank.tier)
@@ -323,22 +357,200 @@ class RiotService:
         if not force and last is not None and now - last < self.refresh_cooldown:
             minutes = int((self.refresh_cooldown - (now - last)).total_seconds() // 60) + 1
             raise PlayerError(f"Já atualizaste há pouco. Tenta de novo daqui a {minutes} min.")
-        client = self._client()
-        accounts = await self.repo.list_accounts(player.id)
-        if not accounts:
+        self._client()
+        if not await self.repo.list_accounts(player.id):
             raise PlayerError("Este jogador não tem contas ligadas.")
         self._last_refresh[player.id] = now
-        for account in accounts:
-            try:
-                current = await client.account_by_puuid(account.puuid, account.platform)
-            except RiotError as exc:
-                raise user_error(exc) from exc
-            if (current.game_name, current.tag_line) != (account.game_name, account.tag_line):
-                await self.repo.update_identity(account.id, current.game_name, current.tag_line)
-        outcome = await self.refresh_rank(player.id, triggered_by)
+        try:
+            outcome = await self._check_player(
+                player.id, triggered_by, with_names=True, background=False
+            )
+        except RiotError as exc:
+            raise user_error(exc) from exc
         for account in await self.repo.list_accounts(player.id):
             self.spawn_history_sync(account)
         return outcome
+
+    async def _check_player(
+        self, player_id: int, triggered_by: int | None, *, with_names: bool, background: bool
+    ) -> RankOutcome:
+        """Ask Riot for the player's current Riot IDs (optional) and main rank, and save them.
+        Raises `RiotError` or `PlayerError`; the callers decide what the player sees."""
+        client = self._client()
+        accounts = await self.repo.list_accounts(player_id)
+        if not accounts:
+            raise PlayerError("Este jogador não tem contas ligadas.")
+        if with_names:
+            for account in accounts:
+                current = await client.account_by_puuid(
+                    account.puuid, account.platform, background=background
+                )
+                if (current.game_name, current.tag_line) != (account.game_name, account.tag_line):
+                    await self.repo.update_identity(account.id, current.game_name, current.tag_line)
+                    log.info("Riot ID of account %s changed; stored the new one.", account.id)
+        outcome = await self._record_rank(player_id, triggered_by, background)
+        self._last_checked[player_id] = self.clock()
+        return outcome
+
+    # --- automatic refresh ----------------------------------------------------------------
+    # Three triggers keep the data current without anyone running /riot refresh: a profile view
+    # (`refresh_for_view`), a ready-check (`spawn_rank_refresh`) and a timer (`refresh_all`).
+    # A failure is only logged: the commands keep working with what is saved.
+
+    async def _due(self, player_id: int, max_age: timedelta) -> bool:
+        last = self._last_checked.get(player_id)
+        if last is not None and self.clock() - last < max_age:
+            return False
+        return bool(await self.repo.list_accounts(player_id))
+
+    async def view_refresh_due(self, discord_id: int) -> bool:
+        """Whether showing this player's profile should first ask Riot (cheap: no network)."""
+        if self.client is None:
+            return False
+        try:
+            player = await self.players.require(discord_id)
+        except PlayerError:
+            return False
+        return await self._due(player.id, self.view_max_age)
+
+    async def refresh_for_view(self, discord_id: int) -> None:
+        """Refresh a player for `/profile view`: wait up to `view_wait_s` for Riot, then give up
+        waiting (the lookup carries on in the background). Never raises."""
+        try:
+            player = await self.players.require(discord_id)
+        except PlayerError:
+            return
+        task = self._start_auto_refresh(
+            player.id, "profile view", with_names=True, with_history=True, background=False
+        )
+        try:
+            await asyncio.wait_for(asyncio.shield(task), self.view_wait_s)
+        except TimeoutError:
+            log.info(
+                "Riot refresh of player %s still running after %.0f s: showing the saved data.",
+                player.id,
+                self.view_wait_s,
+            )
+
+    def spawn_rank_refresh(self, player_ids: Iterable[int]) -> None:
+        """A ready-check began: refresh the ranks of its players in the background, so the
+        proposal is built from current ranks. Does not wait and never raises."""
+        if self.client is None:
+            return
+        ids = list(player_ids)
+
+        async def run() -> None:
+            for player_id in ids:
+                if await self._due(player_id, self.teams_max_age):
+                    self._start_auto_refresh(
+                        player_id,
+                        "ready-check",
+                        with_names=False,
+                        with_history=False,
+                        background=False,
+                    )
+
+        self._spawn(run())
+
+    def _spawn(self, coro: Coroutine[object, object, None]) -> asyncio.Task[None]:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
+    def _start_auto_refresh(
+        self,
+        player_id: int,
+        trigger: str,
+        *,
+        with_names: bool,
+        with_history: bool,
+        background: bool,
+    ) -> asyncio.Task[None]:
+        """Start (or join) the player's automatic refresh. One runs per player at a time."""
+        running = self._inflight.get(player_id)
+        if running is not None and not running.done():
+            return running
+        task = self._spawn(
+            self._auto_refresh(player_id, trigger, with_names, with_history, background)
+        )
+        self._inflight[player_id] = task
+        task.add_done_callback(
+            lambda t: self._inflight.get(player_id) is t and self._inflight.pop(player_id, None)
+        )
+        return task
+
+    async def _auto_refresh(
+        self, player_id: int, trigger: str, with_names: bool, with_history: bool, background: bool
+    ) -> None:
+        started = time.monotonic()
+        try:
+            outcome = await self._check_player(
+                player_id, None, with_names=with_names, background=background
+            )
+        except RiotError as exc:
+            log.warning(
+                "Riot refresh (%s) of player %s failed: %s", trigger, player_id, type(exc).__name__
+            )
+            return
+        except PlayerError as exc:
+            log.info("Riot refresh (%s) of player %s skipped: %s", trigger, player_id, exc)
+            return
+        except Exception:
+            log.exception("Riot refresh (%s) of player %s crashed", trigger, player_id)
+            return
+        log.info(
+            "Riot refresh (%s) of player %s: rank %s, %d ms",
+            trigger,
+            player_id,
+            outcome.label or outcome.status,
+            (time.monotonic() - started) * 1000,
+        )
+        if with_history:
+            await self._sync_stale_history(player_id)
+
+    async def _sync_stale_history(self, player_id: int) -> None:
+        """Re-sync the ranked history (in the background) of accounts not synced lately."""
+        now = self.clock()
+        for account in await self.repo.list_accounts(player_id):
+            synced = account.history_synced_at
+            if synced is None or now - synced >= self.history_max_age:
+                self.spawn_history_sync(account)
+
+    async def refresh_all(self) -> None:
+        """Timer: names, rank and new ranked games of every linked account, in the background
+        (the rate limiter keeps part of the budget free for commands). Stops at the first sign
+        that going on would only fail: a rejected key or a rate limit. Never raises."""
+        if self.client is None:
+            return
+        started = time.monotonic()
+        players = await self.repo.player_ids_with_accounts()
+        checked = failed = 0
+        stopped = ""
+        for player_id in players:
+            try:
+                await self._check_player(player_id, None, with_names=True, background=True)
+                checked += 1
+            except RiotAuthError:
+                stopped = "the API key was rejected"
+                break
+            except RiotRateLimited as exc:
+                stopped = f"Riot is rate limiting (retry after {int(exc.retry_after)} s)"
+                break
+            except (RiotError, PlayerError) as exc:
+                failed += 1
+                log.warning("Riot refresh cycle: player %s failed: %s", player_id, exc)
+                continue
+            await self._sync_stale_history(player_id)
+        log.log(
+            logging.WARNING if stopped else logging.INFO,
+            "Riot refresh cycle: %d of %d players checked, %d failed%s, %d s",
+            checked,
+            len(players),
+            failed,
+            f"; stopped early: {stopped}" if stopped else "",
+            time.monotonic() - started,
+        )
 
     # --- ranked history -> role experience ---------------------------------------------------
 
@@ -390,9 +602,7 @@ class RiotService:
             except Exception:
                 log.exception("History sync failed for account %s", account.id)
 
-        task = asyncio.create_task(run())
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._spawn(run())
 
     async def resume_unfinished_syncs(self) -> int:
         """At startup: continue every first-time history sync that a restart or an error cut

@@ -81,18 +81,16 @@ async def test_linking_your_own_account_shows_the_consent_notice(cog_stack):
     await stack.riot.wait_for_background()
 
 
-async def test_an_admin_linking_for_someone_also_notifies_the_channel_and_pings_them(cog_stack):
+async def test_an_admin_linking_for_someone_posts_nothing_and_pings_nobody(cog_stack):
     cog, stack, _ = cog_stack
     ix = FakeInteraction(99)
     await cog.link.callback(cog, ix, "Alpha#EUW", None, member(1))  # type: ignore[arg-type]
-    private, public = ix.sent
-    assert private["ephemeral"] is True
-    assert "ephemeral" not in public  # visible to the channel
-    assert "<@1>" in public["content"]
-    assert CONSENT_NOTICE in public["content"]
-    assert "/riot unlink" in public["content"]
-    mentioned = public["allowed_mentions"].users
-    assert [u.id for u in mentioned] == [1]
+    assert len(ix.sent) == 1  # only the admin's private summary: nothing in the channel
+    reply = ix.sent[0]
+    assert reply["ephemeral"] is True
+    assert "ligada como principal" in reply["content"]
+    assert CONSENT_NOTICE not in reply["content"]
+    assert "<@1>" not in reply["content"] and "allowed_mentions" not in reply
     accounts = await stack.riot.accounts(1)
     assert accounts[0][0].linked_by == 99
     await stack.riot.wait_for_background()

@@ -776,6 +776,8 @@ async def setup(bot: "KDBot") -> None:
         settings.mock_players,
     )
     icons_cog = bot.get_cog("Icons")
+    riot_service = getattr(bot.get_cog("Riot"), "service", None)
+    service.rank_refresher = getattr(riot_service, "spawn_rank_refresh", None)
     cog = Lobby(bot, service, mock, getattr(icons_cog, "roles", None))
     await bot.add_cog(cog)
     if settings.mock_players:

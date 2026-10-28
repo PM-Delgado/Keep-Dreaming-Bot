@@ -84,6 +84,17 @@ class PlayerService:
         self.role_estimator: Callable[[int], Awaitable[Mapping[str, int | None]]] | None = None
         self.account_labeler: Callable[[int], Awaitable[list[str]]] | None = None
         self.champion_pooler: Callable[[int, int], Awaitable[list[tuple[str, int]]]] | None = None
+        # Ask Riot for fresh data before a profile is shown: `due` is cheap (no network),
+        # `refresher` may wait for Riot (bounded) and never raises.
+        self.view_refresh_due: Callable[[int], Awaitable[bool]] | None = None
+        self.view_refresher: Callable[[int], Awaitable[None]] | None = None
+
+    async def profile_refresh_due(self, discord_id: int) -> bool:
+        return bool(self.view_refresh_due and await self.view_refresh_due(discord_id))
+
+    async def refresh_profile_data(self, discord_id: int) -> None:
+        if self.view_refresher is not None:
+            await self.view_refresher(discord_id)
 
     async def register(
         self,

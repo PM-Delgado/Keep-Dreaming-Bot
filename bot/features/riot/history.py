@@ -33,6 +33,7 @@ class HistoryEntry:
     damage: int | None
     gold: int | None
     vision_score: int | None
+    is_main: bool = False
 
     @property
     def kda(self) -> float:
@@ -72,6 +73,7 @@ def to_entry(game: StoredGame) -> HistoryEntry:
         damage=game.damage,
         gold=game.gold,
         vision_score=game.vision_score,
+        is_main=game.is_main,
     )
 
 
@@ -109,13 +111,13 @@ def format_count(value: int) -> str:
 def format_line(
     entry: HistoryEntry,
     now: datetime,
-    show_account: bool = False,
     details: bool = False,
     champion_icon: str = "",
     role_icon: str = "",
     champion_name: str | None = None,
 ) -> str:
-    """One game: result, champion, role, KDA, CS, duration, age (+ optional extra stats).
+    """One game: result, champion, role, KDA, CS, duration, age, the account it was played on
+    (★ in front of the main one) and optionally extra stats.
 
     The champion and the role are shown as icons when given, else as text (`champion_name` is the
     display name; the entry only has Riot's id).
@@ -133,8 +135,7 @@ def format_line(
         parts.append(f"{entry.cs} CS" + (f" ({per_min:.1f}/min)" if per_min is not None else ""))
     parts += [format_duration(entry.duration_s), format_ago(entry.played_at, now)]
     line = " · ".join(parts)
-    if show_account:
-        line += f" · *{entry.riot_id}*"
+    line += f" · {'★ ' if entry.is_main else ''}*{entry.riot_id}*"
     if details:
         extra = []
         if entry.damage is not None:

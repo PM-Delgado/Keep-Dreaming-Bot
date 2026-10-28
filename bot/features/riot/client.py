@@ -170,8 +170,10 @@ class RiotClient:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         max_retries: int = 2,
         max_retry_wait_s: float = 30.0,
+        on_auth_error: Callable[[], None] | None = None,
     ) -> None:
         self._headers = {"X-Riot-Token": api_key}
+        self._on_auth_error = on_auth_error  # told whenever Riot rejects the key (401/403)
         self._transport = transport or AiohttpTransport()
         self._limiter = limiter or RateLimiter()
         self._sleep = sleep
@@ -202,6 +204,8 @@ class RiotClient:
             if resp.status == 404:
                 raise RiotNotFound(path)
             if resp.status in (401, 403):
+                if self._on_auth_error is not None:
+                    self._on_auth_error()
                 raise RiotAuthError("Riot rejected the API key (expired or not allowed)")
             if resp.status == 429:
                 retry_after = _retry_after(resp.headers)
@@ -224,9 +228,13 @@ class RiotClient:
         )
         return _parse_account(await self._get(account_region(platform), path))
 
-    async def account_by_puuid(self, puuid: str, platform: str) -> RiotAccount:
+    async def account_by_puuid(
+        self, puuid: str, platform: str, background: bool = False
+    ) -> RiotAccount:
         path = f"/riot/account/v1/accounts/by-puuid/{quote(puuid, safe='')}"
-        return _parse_account(await self._get(account_region(platform), path))
+        return _parse_account(
+            await self._get(account_region(platform), path, background=background)
+        )
 
     # --- summoner-v4 --------------------------------------------------------------------
 
@@ -243,11 +251,13 @@ class RiotClient:
 
     # --- league-v4 ----------------------------------------------------------------------
 
-    async def solo_rank(self, puuid: str, platform: str) -> SoloRank | None:
+    async def solo_rank(
+        self, puuid: str, platform: str, background: bool = False
+    ) -> SoloRank | None:
         """The Solo/Duo rank, or None when Riot *confirms* there is none (unranked)."""
         platform = normalise_platform(platform)
         path = f"/lol/league/v4/entries/by-puuid/{quote(puuid, safe='')}"
-        return _parse_solo_rank(await self._get(platform, path))
+        return _parse_solo_rank(await self._get(platform, path, background=background))
 
     # --- match-v5 -----------------------------------------------------------------------
 

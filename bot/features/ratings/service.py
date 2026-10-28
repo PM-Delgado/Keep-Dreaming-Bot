@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from bot.features.ratings.engine import RatingEngine
 from bot.features.ratings.ladder import DEFAULT_LADDER, LadderConfig, Standing, step_progress
@@ -158,12 +158,34 @@ class RatingService:
         created_by: int | None,
         account_key: str | None = None,
         detail: str | None = None,
+        unchanged_for: timedelta | None = None,
     ) -> int:
         """Append a rank signal (the only way R changes) and re-seed H when it is still unproven.
 
         A *failed* Riot request must not call this at all; only successful lookups (ranked or
         confirmed unranked) do, so a failure can never supersede a good signal.
+
+        `unchanged_for` keeps automatic refreshes from filling the history with copies: when the
+        account's latest signal says the same thing and is younger than this, nothing is stored
+        and that signal's id is returned. (A copy is still stored once the old one is older, so
+        the rank's age, the stale flag and the replay order stay meaningful.)
         """
+        previous = None
+        if account_key is not None:
+            same_account = [
+                s
+                for s in await self.repo.list_signals(player_id)
+                if s.source == source and s.account_key == account_key
+            ]
+            previous = same_account[-1] if same_account else None
+        if (
+            unchanged_for is not None
+            and previous is not None
+            and (previous.status, previous.tier, previous.division) == (status, tier, division)
+            and self.clock() - previous.created_at < unchanged_for
+        ):
+            log.debug("Rank signal for player %s unchanged: not stored again", player_id)
+            return previous.id
         before = (await self.resolve(player_id)).rank
         signal_id = await self.repo.add_signal(
             player_id,
@@ -187,6 +209,18 @@ class RatingService:
             tier or "-",
             division or "",
         )
+        if previous is not None and (previous.status, previous.tier, previous.division) != (
+            status,
+            tier,
+            division,
+        ):
+            log.info(
+                "Rank changed for player %s (%s): %s -> %s",
+                player_id,
+                source,
+                _signal_text(previous.status, previous.tier, previous.division),
+                _signal_text(status, tier, division),
+            )
         return signal_id
 
     async def _maybe_reseed(
@@ -269,6 +303,10 @@ class RatingService:
         age = rank_age_days(resolution.rank, now) if resolution.rank else None
         stale = is_stale(resolution.rank, now, self.params) if resolution.rank else False
         return Inspection(stored, self.standing_of(stored), resolution, estimate, age, stale)
+
+
+def _signal_text(status: str, tier: str | None, division: str | None) -> str:
+    return f"{tier} {division or ''}".strip() if tier else status
 
 
 def _normalise(tier: str, division: str | None) -> tuple[str, str | None]:
