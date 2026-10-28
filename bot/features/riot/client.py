@@ -262,7 +262,12 @@ class RiotClient:
     # --- match-v5 -----------------------------------------------------------------------
 
     async def ranked_match_ids(
-        self, puuid: str, platform: str, start_time: int | None = None, count: int = 100
+        self,
+        puuid: str,
+        platform: str,
+        start_time: int | None = None,
+        count: int = 100,
+        background: bool = True,
     ) -> list[str]:
         params: dict[str, Any] = {"queue": RANKED_SOLO_QUEUE_ID, "count": count}
         if start_time is not None:
@@ -270,15 +275,17 @@ class RiotClient:
         path = f"/lol/match/v5/matches/by-puuid/{quote(puuid, safe='')}/ids"
         # History syncs are background work: they leave part of the request budget free for
         # interactive commands (see RateLimiter).
-        data = await self._get(match_region(platform), path, params, background=True)
+        data = await self._get(match_region(platform), path, params, background=background)
         if not isinstance(data, list) or not all(isinstance(i, str) for i in data):
             raise RiotUnavailable("unexpected match id list")
         return data
 
-    async def ranked_game(self, match_id: str, puuid: str, platform: str) -> RankedGame | None:
+    async def ranked_game(
+        self, match_id: str, puuid: str, platform: str, background: bool = True
+    ) -> RankedGame | None:
         """Player's row of a ranked Solo/Duo match; None if it is not one or they are not in it."""
         path = f"/lol/match/v5/matches/{quote(match_id, safe='')}"
-        data = await self._get(match_region(platform), path, background=True)
+        data = await self._get(match_region(platform), path, background=background)
         return parse_ranked_game(data, puuid)
 
 

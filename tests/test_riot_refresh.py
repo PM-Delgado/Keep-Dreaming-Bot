@@ -259,6 +259,63 @@ async def test_the_timer_counts_a_failed_player_and_goes_on(stack, world, caplog
     assert "1 of 2 players checked, 1 failed" in caplog.text
 
 
+# --- /riot history: the new games ----------------------------------------------------------
+
+
+async def stored_games(stack: Stack) -> int:
+    return (await stack.rows("SELECT COUNT(*) FROM riot_role_games"))[0][0]
+
+
+async def test_a_history_view_fetches_new_games_with_the_interactive_budget(stack, world):
+    clock = tick(stack)
+    world.add_game("puuid-alpha", "G1", "MIDDLE", days_ago(NOW, 1))
+    await link(stack, 1, "Alpha#EUW")
+    world.add_game("puuid-alpha", "G2", "MIDDLE", days_ago(NOW, 0.1))
+    assert await stack.riot.history_refresh_due(1) is False  # synced just now
+    clock.advance(minutes=6)
+    assert await stack.riot.history_refresh_due(1) is True
+    assert await stack.riot.history_refresh_due(1, "Nobody#EUW") is False  # not their account
+    assert await stack.riot.history_refresh_due(404) is False  # not registered
+
+    flags = spy_client(stack, world)
+    await stack.riot.refresh_history_for_view(1)
+    assert await stored_games(stack) == 2
+    assert flags and not any(flags)  # the player is waiting: not background work
+    assert await stack.riot.history_refresh_due(1) is False  # checked just now
+
+
+async def test_a_slow_history_view_stops_waiting_but_the_sync_finishes(stack, world, caplog):
+    clock = tick(stack)
+    world.add_game("puuid-alpha", "G1", "MIDDLE", days_ago(NOW, 1))
+    await link(stack, 1, "Alpha#EUW")
+    world.add_game("puuid-alpha", "G2", "MIDDLE", days_ago(NOW, 0.1))
+    clock.advance(minutes=6)
+    caplog.set_level(logging.INFO, logger="bot.features.riot.service")
+    stack.riot.view_wait_s = 0
+    await stack.riot.refresh_history_for_view(1)
+    assert "still syncing" in caplog.text
+    await stack.riot.wait_for_background()
+    assert await stored_games(stack) == 2
+
+
+async def test_a_history_view_never_raises_when_riot_fails(stack, world, caplog):
+    clock = tick(stack)
+    world.add_game("puuid-alpha", "G1", "MIDDLE", days_ago(NOW, 1))
+    await link(stack, 1, "Alpha#EUW")
+    clock.advance(minutes=6)
+    world.forced["/lol/match"] = 500
+    caplog.set_level(logging.INFO, logger="bot.features.riot.service")
+    await stack.riot.refresh_history_for_view(1)  # no exception
+    assert "history view" in caplog.text and "failed" in caplog.text
+    assert await stack.riot.history_refresh_due(1) is True  # tried, not recorded as synced
+
+
+async def test_nothing_is_asked_for_history_without_a_key(db, world):
+    keyless = Stack(db, world, enabled=False)
+    await keyless.register(1, "Ana")
+    assert await keyless.riot.history_refresh_due(1) is False
+
+
 # --- the champion pool ------------------------------------------------------------------------
 
 

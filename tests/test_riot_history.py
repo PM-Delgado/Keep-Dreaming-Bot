@@ -139,12 +139,13 @@ def test_unknown_role_and_missing_stats_degrade_gracefully():
 def test_format_line_contains_the_requested_details():
     line = format_line(to_entry(stored()), NOW)
     assert line.startswith("✅ **Ahri**")
-    for part in ("Mid", "7/2/9 (8.0 KDA)", "192 CS (6.2/min)", "31 min", "há 2 d"):
+    for part in ("Mid", "7/2/9 (8.0)", "192 CS (6.2/min)", "31 min", "há 2 d"):
         assert part in line
-    assert line.endswith(" · *Alpha#EUW*")  # the account is always named
-    assert "★" not in line  # ...and starred only when it is the main account
+    assert "Alpha#EUW" not in line and "★" not in line  # no account name; a star only for the main
     starred = format_line(to_entry(stored(is_main=True)), NOW)
-    assert starred.endswith(" · ★ *Alpha#EUW*")
+    assert starred == f"★ {line}"  # the star goes first, so it adds almost no width
+    assert "Alpha#EUW" not in starred
+    assert "\n" not in starred  # one game, one line
     assert format_line(to_entry(stored(win=False)), NOW).startswith("❌")
     assert format_line(to_entry(stored(duration_s=200)), NOW).startswith("🔁")
 
@@ -310,7 +311,9 @@ async def test_history_command_is_public_and_shows_ten_games(stack, world, cog):
     assert embed.thumbnail.url == "https://cdn.invalid/a.png"
     lines = embed.description.split("\n\n")[2].split("\n")
     assert len(lines) == 10
-    assert all("**Jinx**" in line and "ADC" in line and "8/2/6 (7.0 KDA)" in line for line in lines)
+    assert all("**Jinx**" in line and "ADC" in line and "8/2/6 (7.0)" in line for line in lines)
+    assert all(line.startswith("★ ") for line in lines)  # all played on the main account
+    assert not any("Alpha#EUW" in line for line in lines)
     assert "Jogos: 6V 4D (60%)" in embed.description
     assert embed.footer.text is None  # the sync note is a small line in the description
     assert "-# Última atualização: há " in embed.description
@@ -327,18 +330,22 @@ async def test_history_command_defaults_to_yourself_and_reports_problems_private
     assert "não registado" in ix.sent[0]["content"]
 
 
-async def test_history_embed_shows_the_account_when_games_come_from_several(stack, world):
+async def test_history_marks_the_main_accounts_games_with_a_star_and_never_names_accounts(
+    stack, world
+):
     world.add_game("puuid-alpha", "A_1", "TOP", days_ago(NOW, 1))
     world.add_game("puuid-beta", "B_1", "TOP", days_ago(NOW, 2))
-    await stack.riot.link(1, "Alpha#EUW", None, 99)
+    await stack.riot.link(1, "Alpha#EUW", None, 99)  # the main account
     await stack.riot.link(1, "Beta#EUW", None, 99)
     await stack.riot.wait_for_background()
     both = build_history_embed(await stack.riot.recent_history(1), NOW)
-    assert "*Alpha#EUW*" in (both.description or "")
-    assert "*Beta#EUW*" in (both.description or "")
+    lines = (both.description or "").split("\n\n")[2].split("\n")  # one line per game
+    assert len(lines) == 2
+    assert lines[0].startswith("★ ")  # Alpha's game
+    assert not lines[1].startswith("★")  # Beta is not the main
+    assert "Alpha#EUW" not in "".join(lines) and "Beta#EUW" not in "".join(lines)
     one = build_history_embed(await stack.riot.recent_history(1, riot_id="Beta#EUW"), NOW)
     assert "· Beta#EUW" in (one.description or "").splitlines()[0]  # the heading names it
-    assert "*Alpha#EUW*" not in (one.description or "")
 
 
 async def test_history_autocomplete_is_open_to_everyone_unlike_management(stack, cog):
@@ -400,7 +407,7 @@ def test_format_line_shows_champion_and_role_as_icons_when_both_exist():
     line = format_line(
         to_entry(stored()), NOW, champion_icon="<:champ_Ahri:1>", role_icon="<:role_mid:2>"
     )
-    assert line.startswith("✅ <:champ_Ahri:1> <:role_mid:2> · 7/2/9 (8.0 KDA)")
+    assert line.startswith("✅ <:champ_Ahri:1> <:role_mid:2> · 7/2/9 (8.0)")
     words = line.replace("<:champ_Ahri:1>", "").replace("<:role_mid:2>", "")
     assert "Ahri" not in words and "Mid" not in words  # no words where icons say it
     assert "192 CS (6.2/min)" in line and "há 2 d" in line
@@ -437,3 +444,56 @@ async def test_history_embed_uses_icons_and_display_names_from_the_maps(stack, w
     assert "<:champ_MonkeyKing:7> <:role_mid:8>" in wukong
     ahri = next(line for line in lines if "Ahri" in line)
     assert "**Ahri**" in ahri and "Suporte" in ahri  # no icon for either: text fallback
+
+
+# --- /riot history asks Riot for new games first ----
+
+
+async def seen_history(stack, world) -> None:
+    world.add_game("puuid-alpha", "A_1", "TOP", days_ago(NOW, 1), champion="Garen")
+    await stack.riot.link(1, "Alpha#EUW", None, 99)
+    await stack.riot.wait_for_background()
+    world.add_game("puuid-alpha", "A_2", "TOP", days_ago(NOW, 0.1), champion="Darius")  # since then
+
+
+async def test_history_asks_riot_for_new_games_when_the_data_is_old(stack, world, cog):
+    await seen_history(stack, world)
+    stack.riot.clock = lambda: NOW + timedelta(minutes=6)
+    ix = FakeInteraction(7)
+    await cog.history.callback(cog, ix, member(1), None)  # type: ignore[arg-type]
+    assert ix.deferred  # acknowledged first: Riot may take a moment
+    description = ix.sent[0]["embed"].description
+    assert "Darius" in description and "Garen" in description  # the new game is already in
+
+
+async def test_history_does_not_ask_riot_again_within_five_minutes(stack, world, cog):
+    await seen_history(stack, world)
+    stack.riot.clock = lambda: NOW + timedelta(minutes=4)
+    calls = len(world.calls)
+    ix = FakeInteraction(7)
+    await cog.history.callback(cog, ix, member(1), None)  # type: ignore[arg-type]
+    assert not ix.deferred and len(world.calls) == calls
+    assert "Darius" not in ix.sent[0]["embed"].description
+
+
+async def test_history_still_answers_when_riot_fails(stack, world, cog):
+    await seen_history(stack, world)
+    stack.riot.clock = lambda: NOW + timedelta(minutes=6)
+    world.forced["/lol/match"] = 500
+    ix = FakeInteraction(7)
+    await cog.history.callback(cog, ix, member(1), None)  # type: ignore[arg-type]
+    assert ix.deferred
+    description = ix.sent[0]["embed"].description
+    assert "Garen" in description and "Darius" not in description  # the saved games, no error
+
+
+async def test_history_leaves_an_unfinished_first_sync_to_the_background(stack, world, cog):
+    await seen_history(stack, world)
+    await stack.db.conn.execute("UPDATE riot_accounts SET history_synced_at = NULL")
+    await stack.db.conn.commit()
+    stack.riot.clock = lambda: NOW + timedelta(minutes=6)
+    calls = len(world.calls)
+    ix = FakeInteraction(7)
+    await cog.history.callback(cog, ix, member(1), None)  # type: ignore[arg-type]
+    assert not ix.deferred and len(world.calls) == calls  # no wait for a hundred games
+    assert "ainda está a sincronizar" in ix.sent[0]["embed"].description
