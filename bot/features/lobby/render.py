@@ -126,31 +126,29 @@ def build_lobby_embed(
 
     if scheduled_open and lobby.scheduled_for is not None:
         stamp = int(lobby.scheduled_for.timestamp())
-        lines.append(
-            f"Começa <t:{stamp}:F> (<t:{stamp}:R>). Carrega em **Entrar** para guardares lugar."
-        )
+        lines.append(f"- **Quando:** <t:{stamp}:F> (<t:{stamp}:R>)")
+        lines.append("- Carrega em **Entrar** para guardares lugar.")
         if lobby.reminder_stage >= 2:
-            lines.append("A hora já passou: o ready-check começa assim que houver 10 jogadores.")
+            lines.append("- A hora já passou: o ready-check começa assim que houver 10 jogadores.")
         else:
-            lines.append("À hora marcada, com 10 jogadores, começa o ready-check.")
+            lines.append("- À hora marcada, com 10 jogadores, começa o ready-check.")
     elif status == OPEN:
-        lines.append("Carrega em **Entrar**. Com 10 jogadores começa o ready-check.")
+        lines.append("- Carrega em **Entrar** para guardares lugar.")
+        lines.append("- Com 10 jogadores começa o ready-check.")
     elif status == READY_CHECK and lobby.ready_deadline is not None:
         stamp = int(lobby.ready_deadline.timestamp())
-        lines.append(
-            f"Todos têm de carregar em **Pronto** <t:{stamp}:R>. Quem não confirmar sai e "
-            "é substituído pelas reservas."
-        )
+        lines.append(f"- **Prazo:** todos têm de carregar em **Pronto** <t:{stamp}:R>.")
+        lines.append("- Quem não confirmar sai e é substituído pelas reservas.")
 
     if status in (TEAMS_PROPOSED, IN_PROGRESS, COMPLETED):
         failure = _add_teams(embed, snapshot, roles)
         if failure:
-            lines.append(failure)
+            lines.append(f"- {failure}")
     if status in (IN_PROGRESS, COMPLETED):
         lines.extend(_describe_game(snapshot, auto_confirm_minutes))
 
     if status == CANCELLED:
-        lines.append(f"Lobby encerrada ({lobby.cancel_reason or 'cancelada'}).")
+        lines.append(f"- Lobby encerrada ({lobby.cancel_reason or 'cancelada'}).")
     elif status == IN_PROGRESS:
         lines.append("-# Só o resultado confirmado conta para o rank.")
     elif status == TEAMS_PROPOSED:
@@ -173,28 +171,32 @@ def _add_teams(
 
 
 def _describe_game(snapshot: LobbySnapshot, auto_minutes: int) -> list[str]:
-    """The lines under the heading of a started game: playing, waiting for a confirmation, done."""
+    """The bullets under the heading of a started game: playing, waiting for a result, done."""
     match = snapshot.match
     if match is None:
         return []
     winner = SIDE_NAME.get(match.winner or "", "?")
     if match.status == "confirmed":
         how = " (confirmado automaticamente)" if match.auto_confirmed else ""
-        return [f"🏆 **{winner} ganhou**{how}!"]
+        return [f"- **Resultado:** {winner} ganhou{how}."]
     if match.status == "reported" and match.reported_at is not None:
         who = discord.utils.escape_markdown(snapshot.reporter or "?")
         if match.contested:
             return [
-                f"⚠️ **{who}** reportou que o **{winner}** ganhou, mas o resultado foi "
-                "contestado. Um admin tem de decidir (botões da equipa vencedora)."
+                f"- **{who}** reportou que o **{winner}** ganhou, mas o resultado foi contestado.",
+                "- Um admin tem de decidir (botões da equipa vencedora).",
             ]
         stamp = int((match.reported_at + timedelta(minutes=auto_minutes)).timestamp())
         return [
-            f"📣 **{who}** reportou: **{winner} ganhou**. Alguém da outra equipa confirma, ou "
-            f"contesta se não é verdade; sem objeções confirma <t:{stamp}:R>."
+            f"- **{who}** reportou: **{winner} ganhou**.",
+            "- Alguém da outra equipa confirma, ou contesta se não é verdade.",
+            f"- Sem objeções, confirma <t:{stamp}:R>.",
         ]
     if match.status == "in_progress":
-        return ["⚔️ Jogo em curso. Quando acabar, alguém carrega no botão da equipa vencedora."]
+        return [
+            "- **Estado:** jogo em curso.",
+            "- Quando acabar, alguém carrega no botão da equipa vencedora.",
+        ]
     return []
 
 
