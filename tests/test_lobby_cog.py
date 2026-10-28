@@ -683,6 +683,9 @@ async def test_reporting_through_the_buttons_asks_the_other_team_to_confirm(env)
     text = text_of(ix.edited[0]["embed"])
     assert "reportou" in text
     assert "Azul ganhou" in text
+    assert (
+        len(assert_bullets(ix.edited[0]["embed"])) == 3
+    )  # who reported, what next, when it counts
     assert button_ids(ix)[:2] == ["lobby:confirm_result", "lobby:contest"]
     [ping] = env.channel.sent
     for pid in sides["red"]:
@@ -740,6 +743,9 @@ async def test_the_sweeper_auto_confirms_refreshes_the_message_and_posts_the_sum
     await env.cog.sweeper.coro(env.cog)
     edit = env.channel.messages[777].edits[-1]
     assert "confirmado automaticamente" in text_of(edit["embed"])
+    assert assert_bullets(edit["embed"]) == [
+        "- **Resultado:** Vermelho ganhou (confirmado automaticamente)."
+    ]
     [summary] = env.channel.sent
     assert "Vermelho ganhou" in summary["content"]
     assert "automaticamente" in summary["content"]
@@ -811,6 +817,9 @@ async def test_match_fix_and_void_are_for_admins_and_update_the_message(env):
     assert "Lobby encerrada (erro de registo)" in text_of(
         env.channel.messages[777].edits[-1]["embed"]
     )
+    assert assert_bullets(env.channel.messages[777].edits[-1]["embed"]) == [
+        "- Lobby encerrada (erro de registo)."
+    ]
     assert "anulado" in env.channel.sent[-1]["content"]
     ix = FakeInteraction(1)
     await env.cog.match_void.callback(env.cog, ix, match.id, "x")  # type: ignore[arg-type]
@@ -1132,9 +1141,9 @@ def test_validation_footer_covers_every_state(env):
         assert validation_footer(replace(base, status=status), "Ana", ["Ana"], 1) is None
 
 
-async def test_every_button_has_an_emoji_and_keeps_its_persistent_id(env):
+async def test_the_buttons_are_text_only_and_keep_their_persistent_ids(env):
     view = LobbyView(env.cog, None)
-    assert all(item.emoji is not None for item in view.children)  # type: ignore[attr-defined]
+    assert all(item.emoji is None for item in view.children)  # type: ignore[attr-defined]
     assert {item.custom_id for item in view.children} == {  # type: ignore[attr-defined]
         f"lobby:{action}" for action in ACTIONS
     }
@@ -1268,3 +1277,44 @@ def test_scrim_setup_problems_are_reported_in_plain_words():
     assert "will not notify" in silent
     assert scrim_setup_problems(guild(mentionable=False, can_mention=True), None, 2) == []
     assert scrim_setup_problems(guild(found=False), None, None) == []  # nothing configured
+
+
+# --- the lobby message: bullets under the heading ----
+
+
+def under_the_heading(embed: discord.Embed) -> list[str]:
+    lines = (embed.description or "").splitlines()
+    assert lines[0].startswith("# ")
+    return lines[1:]
+
+
+def assert_bullets(embed: discord.Embed) -> list[str]:
+    """Every line under the heading is a bullet (`- `) or the small note (`-# `)."""
+    lines = under_the_heading(embed)
+    assert lines and all(x.startswith("- ") or x.startswith("-# ") for x in lines), lines
+    return [x for x in lines if x.startswith("- ")]
+
+
+async def test_an_open_lobby_explains_itself_in_bullets(env):
+    lobby_id, _ = await open_as(env)
+    snapshot = await env.stack.lobbies.snapshot(lobby_id)
+    bullets = assert_bullets(build_lobby_embed(snapshot))
+    assert bullets == [
+        "- Carrega em **Entrar** para guardares lugar.",
+        "- Com 10 jogadores começa o ready-check.",
+    ]
+
+
+async def test_a_scheduled_lobby_leads_with_when_it_starts(env):
+    lobby_id = await schedule_as(env)
+    snapshot = await env.stack.lobbies.snapshot(lobby_id)
+    bullets = assert_bullets(build_lobby_embed(snapshot))
+    assert bullets[0].startswith("- **Quando:** <t:") and ":F> (<t:" in bullets[0]
+    assert len(bullets) == 3  # when, how to join, what happens at that time
+
+
+async def test_a_ready_check_states_the_deadline_as_a_bullet(env):
+    update = await env.stack.full_lobby(10)
+    bullets = assert_bullets(build_lobby_embed(update.snapshot))
+    assert bullets[0].startswith("- **Prazo:** todos têm de carregar em **Pronto** <t:")
+    assert bullets[1] == "- Quem não confirmar sai e é substituído pelas reservas."
