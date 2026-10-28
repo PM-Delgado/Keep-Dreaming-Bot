@@ -129,6 +129,13 @@ class LobbyService:
         self.clock = clock
         self.rng = rng or random.Random()
         self._locks: dict[int, asyncio.Lock] = {}
+        # Set by the optional Riot module: called (without waiting) with the players of a
+        # ready-check, so their ranks are current by the time the teams are proposed.
+        self.rank_refresher: Callable[[Sequence[int]], None] | None = None
+
+    def _refresh_ranks(self, player_ids: Sequence[int]) -> None:
+        if self.rank_refresher is not None:
+            self.rank_refresher(player_ids)
 
     def _lock(self, lobby_id: int) -> asyncio.Lock:
         return self._locks.setdefault(lobby_id, asyncio.Lock())
@@ -574,6 +581,7 @@ class LobbyService:
                 roster_json=json.dumps(ids),
             ):
                 events.append("ready_check_started")
+                self._refresh_ranks(ids)
             return
 
         if lobby.status not in (READY_CHECK, TEAMS_PROPOSED):
@@ -604,6 +612,7 @@ class LobbyService:
                 proposal_json=None,
             ):
                 events.append("roster_changed")
+                self._refresh_ranks(ids)
             return
         everyone_ready = lobby.status == READY_CHECK and all(e.status == READY for e in roster)
         if everyone_ready and await self._propose(lobby, roster):

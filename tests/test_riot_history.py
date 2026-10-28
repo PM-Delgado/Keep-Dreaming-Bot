@@ -141,8 +141,10 @@ def test_format_line_contains_the_requested_details():
     assert line.startswith("✅ **Ahri**")
     for part in ("Mid", "7/2/9 (8.0 KDA)", "192 CS (6.2/min)", "31 min", "há 2 d"):
         assert part in line
-    assert "Alpha#EUW" not in line
-    assert "*Alpha#EUW*" in format_line(to_entry(stored()), NOW, show_account=True)
+    assert line.endswith(" · *Alpha#EUW*")  # the account is always named
+    assert "★" not in line  # ...and starred only when it is the main account
+    starred = format_line(to_entry(stored(is_main=True)), NOW)
+    assert starred.endswith(" · ★ *Alpha#EUW*")
     assert format_line(to_entry(stored(win=False)), NOW).startswith("❌")
     assert format_line(to_entry(stored(duration_s=200)), NOW).startswith("🔁")
 
@@ -223,7 +225,6 @@ async def test_sync_stores_the_extra_stats_and_history_returns_newest_first(stac
     assert view.games[1].win is False
     assert (view.games[0].cs, view.games[0].damage, view.games[0].gold) == (192, 24_130, 12_345)
     assert view.last_synced == NOW
-    assert not view.multiple_accounts
     assert view.nickname == "Ana"
     assert len((await stack.riot.recent_history(1, limit=3)).games) == 3
 
@@ -238,11 +239,11 @@ async def test_history_merges_accounts_and_can_be_limited_to_one(stack, world):
     merged = await stack.riot.recent_history(1)
     assert [g.champion for g in merged.games] == ["Garen", "Zed", "Darius"]
     assert [g.riot_id for g in merged.games] == ["Alpha#EUW", "Beta#EUW", "Alpha#EUW"]
-    assert merged.multiple_accounts
+    assert [g.is_main for g in merged.games] == [True, False, True]  # Alpha is the main
     only_beta = await stack.riot.recent_history(1, riot_id="beta#euw")
     assert [g.champion for g in only_beta.games] == ["Zed"]
     assert only_beta.account is not None
-    assert not only_beta.multiple_accounts
+    assert [g.is_main for g in only_beta.games] == [False]
 
 
 async def test_history_error_messages(stack, world):
@@ -312,8 +313,8 @@ async def test_history_command_is_public_and_shows_ten_games(stack, world, cog):
     assert all("**Jinx**" in line and "ADC" in line and "8/2/6 (7.0 KDA)" in line for line in lines)
     assert "Jogos: 6V 4D (60%)" in embed.description
     assert embed.footer.text is None  # the sync note is a small line in the description
-    assert "-# Guardado no último sync" in embed.description
-    assert "/riot refresh" in embed.description
+    assert "-# Última atualização: há " in embed.description
+    assert "/riot" not in embed.description.split("-# ")[-1]  # no command advice in the footer
 
 
 async def test_history_command_defaults_to_yourself_and_reports_problems_privately(stack, cog):

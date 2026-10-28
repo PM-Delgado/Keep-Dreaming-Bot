@@ -538,3 +538,16 @@ async def test_migration_6_drops_the_unused_preference_table_and_keeps_lobbies(t
             assert list(await cur.fetchall()) == [(1,)]
     finally:
         await database.close()
+
+
+async def test_a_ready_check_asks_the_riot_module_to_refresh_its_players(stack):
+    seen: list[list[int]] = []
+    stack.lobbies.rank_refresher = lambda ids: seen.append(sorted(ids))
+    update = await stack.full_lobby(10)
+    lobby_id = update.snapshot.lobby.id
+    assert seen == [list(range(1, 11))]  # once, as the ready-check starts
+    await stack.lobbies.leave(lobby_id, 4)  # back to open: nothing to refresh
+    assert len(seen) == 1
+    await stack.register(1, start=11)
+    await stack.lobbies.join(lobby_id, 11)  # a new ready-check with a different roster
+    assert len(seen) == 2 and 11 in seen[1] and 4 not in seen[1]

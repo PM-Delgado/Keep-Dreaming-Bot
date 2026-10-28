@@ -92,7 +92,7 @@ every error message is private). Commands marked *admin* need your Discord user 
 | Command | Reply | What it does |
 |---|---|---|
 | `/register <nickname>` | private | Join the Scrims roster (2-24 characters, unique). Starts at a default rating until you give a rank. |
-| `/profile view [user]` | public | Nickname (large) with the Discord avatar and a side bar in the colour of the player's League Solo/Duo tier; *Scrims* (`Rank:` with a progress bar or placement `n/5`, record and win rate, `KDA:` over all validated games); *Win Rate Scrims* (icon and `2V/0D` for all five roles, `0V/0D` where there are no games); *Campeões Scrims* (top 5 role + champion, validated stats); *Roles* (icon and proficiency); and last the League reference: *Rank League*, *Contas Riot* (★ = main) and *Campeões Solo/Duo* (icons of the top 3 of the stored ranked games). No footer. A player who is not registered gets a private error. |
+| `/profile view [user]` | public | Nickname (large) with the Discord avatar and a side bar in the colour of the player's League Solo/Duo tier; *Scrims* (`Rank:` with a progress bar or placement `n/5`, record and win rate, `KDA:` over all validated games); *Win Rate Scrims* (icon and `2V/0D` for all five roles, `0V/0D` where there are no games); *Campeões Scrims* (top 5 role + champion, validated stats); *Roles* (icon and proficiency); and last the League reference: *Rank League*, *Contas Riot* (★ = main) and *Campeões Solo/Duo* (icons of the top 3 of the stored ranked games, the games of all the player's linked accounts added up). If the player's Riot data is older than 30 minutes the bot first asks Riot (up to 4 seconds; the answer then arrives as a reply to "thinking..."), so rank and Riot IDs are current without running `/riot refresh`; a Riot failure never blocks the profile. No footer. A player who is not registered gets a private error. |
 | `/profile roles <role> <proficiency>` | private | Set how comfortable you are (1-5) on a role, or `Limpar` to clear it. |
 | `/profile rank <tier> [division]` | private | Report your League Solo/Duo rank; it seeds your starting rating while you have few games. |
 | `/history [user]` | public | Large heading `Histórico · Name` with the Discord avatar and a side bar in the player's League tier colour; `Jogos: 10V 8D (56%) · 18 jogos`, then the last 10 confirmed games: result, role, champion and KDA (validated stats only; pending ones show "stats por validar"). No footer. Not registered: the same private error as `/profile view`. |
@@ -128,12 +128,12 @@ Without the key every `/riot` command answers that the integration is disabled.
 
 | Command | Reply | What it does |
 |---|---|---|
-| `/riot link <riot_id> [platform] [player]` | private | Link a Riot account (`Name#TAG`; the platform defaults to `RIOT_DEFAULT_PLATFORM`). The first becomes the main. Shows the consent notice. Only admins may use `player`. |
+| `/riot link <riot_id> [platform] [player]` | private | Link a Riot account (`Name#TAG`; the platform defaults to `RIOT_DEFAULT_PLATFORM`). The first becomes the main. Linking your own account shows the consent notice; an admin linking for someone gets only the private summary (nothing is posted in the channel and the player is not pinged: the consent is agreed outside the bot). Only admins may use `player`. |
 | `/riot main <riot_id> [player]` | private | Choose which account supplies the rank. |
 | `/riot unlink <riot_id> [player]` | private | Remove an account and all data tied to it. |
 | `/riot list [player]` | public | Large heading `Contas Riot · Name` with the avatar and the tier-coloured side bar; one line per account (★ = main, games stored, last sync); no footer. |
-| `/riot refresh [player]` | private | Refresh names, rank and ranked history (10 minute cooldown for players; admins skip it). |
-| `/riot history [player] [riot_id]` | public | Heading `Solo/Duo · Name` with the avatar and tier colour, `Jogos: 6V 4D (60%) · KDA: 3.25`, then the last ten ranked Solo/Duo games (result, champion and role icons, KDA, CS, duration); a small line says when it was last synced. |
+| `/riot refresh [player]` | private | Refresh names, rank and ranked history right now (10 minute cooldown for players; admins skip it). Rarely needed: profile views, ready-checks and a 6-hourly timer already refresh automatically (see `docs/riot-policy.md`). |
+| `/riot history [player] [riot_id]` | public | Heading `Solo/Duo · Name` with the avatar and tier colour, `Jogos: 6V 4D (60%) · KDA: 3.25`, then the last ten ranked Solo/Duo games (result, champion and role icons, KDA, CS, duration, and the account it was played on, with a ★ in front of the main one); a small line says when it was last updated. |
 
 ### Admin
 
@@ -219,7 +219,7 @@ When you are done, `python -m bot.features.roster reset --keep-roster --yes` rem
 | `/match fix match:n winner:Vermelho`, `/match void match:n reason:teste` | Private "✏️ Jogo #n: **Vermelho** ganhou." / "🚫 Jogo #n anulado." plus a channel summary ("✏️ Resultado ... corrigido" / "🚫 Scrim #n anulado (teste)"); ratings follow. |
 | `/history`, `/stats`, `/leaderboard board:...` | The public embeds described in the Players table (no footer on any of them). A brand-new player: "Ainda não há jogos confirmados."; boards without enough games: "Ainda ninguém tem 5 jogos." / "Ainda ninguém terminou a colocação." |
 | `/lobby schedule when:amanhã 21:00 note:teste`, `/lobby list`, `/lobby cancel` | Public "📅 Scrim #n · Agendado" message; the list shows both lobbies; cancel answers privately "🛑 Lobby cancelada." |
-| `/riot link riot_id:Nome#TAG` (needs the key) | Private summary plus the consent notice; `/riot list` and `/riot history` answer publicly. |
+| `/riot link riot_id:Nome#TAG` (needs the key) | Private summary (plus the consent notice when linking your own account); `/riot list` and `/riot history` answer publicly. |
 | `/admin rating inspect user:@x` | Private embed with H, R and E (raw numbers; the only place they appear). |
 | `/admin rating set`, `/admin rating rank`, `/admin roles set`, `/admin rating recompute` | Private one-line confirmations; "🔄 Ratings reconstruídos." for recompute. |
 | `/sync` | Private: "🔄 Sincronizados n comandos." (bot owner only; anyone else is refused). |

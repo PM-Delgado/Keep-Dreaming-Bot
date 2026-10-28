@@ -1,5 +1,6 @@
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import discord
 import pytest_asyncio
@@ -342,3 +343,46 @@ async def test_profile_roles_replies_with_the_role_icon_and_clears_with_a_broom(
     ix = fake_interaction(1)
     await players_cog.roles.callback(players_cog, ix, top, SimpleNamespace(value=0))
     assert ix.response.sent[0]["content"] == "🧹 **Top**: limpa."  # no icon: the name stands in
+
+
+async def test_profile_view_asks_riot_first_when_the_data_is_old(stack):
+    players_cog, _, players, _ = stack
+    await players.register(1, "Ana")
+    steps: list[str] = []
+
+    async def due(discord_id: int) -> bool:
+        steps.append("due?")
+        return True
+
+    async def refresher(discord_id: int) -> None:
+        steps.append("refreshed")
+
+    players.view_refresh_due, players.view_refresher = due, refresher
+    ix = fake_interaction(1)
+    ix.response.defer = AsyncMock()
+    ix.followup = SimpleNamespace(send=AsyncMock())
+    member = SimpleNamespace(id=1, display_avatar=SimpleNamespace(url="https://cdn.invalid/a.png"))
+    await players_cog.view.callback(players_cog, ix, member)
+    ix.response.defer.assert_awaited_once()  # acknowledged before the wait for Riot
+    assert steps == ["due?", "refreshed"]
+    assert ix.response.sent == []  # the answer goes through the follow-up instead
+    assert isinstance(ix.followup.send.await_args.kwargs["embed"], discord.Embed)
+
+
+async def test_profile_view_does_not_wait_for_riot_when_the_data_is_fresh(stack):
+    players_cog, _, players, _ = stack
+    await players.register(1, "Ana")
+
+    async def not_due(discord_id: int) -> bool:
+        return False
+
+    async def refresher(discord_id: int) -> None:
+        raise AssertionError("must not refresh fresh data")
+
+    players.view_refresh_due, players.view_refresher = not_due, refresher
+    ix = fake_interaction(1)
+    ix.response.defer = AsyncMock()
+    member = SimpleNamespace(id=1, display_avatar=SimpleNamespace(url="https://cdn.invalid/a.png"))
+    await players_cog.view.callback(players_cog, ix, member)
+    ix.response.defer.assert_not_awaited()
+    assert "embed" in ix.response.sent[0]

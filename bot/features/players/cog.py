@@ -71,8 +71,16 @@ class Players(commands.Cog):
     @app_commands.describe(user="De quem queres ver o perfil (por defeito, o teu).")
     async def view(self, interaction: discord.Interaction, user: discord.Member | None = None):
         target = user or interaction.user
+        send = interaction.response.send_message
         try:
             profile = await self.players.profile(target.id)
+            if await self.players.profile_refresh_due(target.id):
+                # Riot may take a moment and Discord wants an answer within 3 s: acknowledge
+                # first (the refresh waits a few seconds at most), then read the profile again.
+                await interaction.response.defer()
+                await self.players.refresh_profile_data(target.id)
+                profile = await self.players.profile(target.id)
+                send = interaction.followup.send
         except PlayerError as exc:
             log_refusal(interaction, exc)
             await interaction.response.send_message(NOT_REGISTERED, ephemeral=True)
@@ -99,9 +107,7 @@ class Players(commands.Cog):
             names,
             target.display_avatar.url,
         )
-        await interaction.response.send_message(
-            embed=embed, allowed_mentions=discord.AllowedMentions.none()
-        )
+        await send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @profile.command(name="roles", description="Define o quão à vontade estás numa role.")
     @app_commands.describe(role="A role.", proficiency="De 1 a 5, ou Limpar.")
