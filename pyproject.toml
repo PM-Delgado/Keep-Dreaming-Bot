@@ -1,7 +1,15 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "keep-dreaming-bot"
 version = "0.2.0"
 description = "The Discord bot of the Keep Dreaming community: name of the day, League of Legends scrims and more."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "PM-Delgado" }]
 requires-python = ">=3.11"
 dependencies = [
     "discord.py>=2.4",
@@ -14,6 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff", "pyright"]
+
+[project.urls]
+Repository = "https://github.com/PM-Delgado/Keep-Dreaming-Bot"
+Issues = "https://github.com/PM-Delgado/Keep-Dreaming-Bot/issues"
 
 [tool.setuptools.packages.find]
 include = ["bot*"]
