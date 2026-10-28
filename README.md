@@ -1,13 +1,11 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner-dark.png">
-    <img src="docs/images/banner-light.png" alt="Keep Dreaming Bot" width="100%">
-  </picture>
+  <img src="docs/images/banner-light.png#gh-light-mode-only" alt="Keep Dreaming Bot" width="100%">
+  <img src="docs/images/banner-dark.png#gh-dark-mode-only" alt="Keep Dreaming Bot" width="100%">
 </p>
 
 <p align="center">
-  <b>Balanced League of Legends in-house games for your Discord server.</b><br>
-  Lobbies, ready-checks, role-aware teams, results and a rating that moves as games are played.
+  <b>The Discord bot of the Keep Dreaming community.</b><br>
+  The name of the day, League of Legends scrims with balanced teams and ratings, and whatever the server asks for next.
 </p>
 
 <p align="center">
@@ -19,9 +17,9 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-it-does-today">What it does</a> ·
+  <a href="#how-scrims-work">How Scrims work</a> ·
+  <a href="#run-your-own-copy">Run your own copy</a> ·
   <a href="#commands">Commands</a> ·
   <a href="#configuration">Configuration</a> ·
   <a href="docs/README.md">Docs</a>
@@ -29,15 +27,26 @@
 
 ## What it is
 
-Keep-Dreaming-Bot is a Discord bot that runs League of Legends **in-house games** ("Scrims"): ten players
-sign up, confirm they are ready, get balanced teams that respect everyone's roles, report the result, and
-see a hidden rating and a visible in-house rank change over time. It started as a "name of the day" joke
-and still has that command.
+Keep-Dreaming-Bot is the bot of the **Keep Dreaming** Discord server. It is made for that community and
+runs there every day. It is not a public bot (there is no invite link) and it is not meant to be a
+general-purpose matchmaking product: it is the server's own bot, and it does whatever the community has
+wanted so far.
 
-It was built for one Portuguese-speaking friends' server and runs there today. You can host your own copy,
-but **the bot's replies are in Portuguese**; this README, the code and the docs are in English.
+It started as a "name of the day" joke and has grown one feature at a time. It currently does two things,
+and gets more as the server asks for them:
 
-## Features
+- **Name of the day**, the original joke.
+- **Scrims**, the server's League of Legends in-house games: lobbies, balanced teams, results, ratings
+  and stats.
+
+The code is open so anyone can read it, learn from it or fork it. Running your own copy is possible (see
+[below](#run-your-own-copy)) but it is not the goal, and the server's choices are built in: **the bot's
+replies are in Portuguese**, and the Scrims ranks and names are the community's own. This README, the code
+and the docs are in English.
+
+## What it does today
+
+### Scrims
 
 - **In-house lobbies.** One live message with buttons. Ten players start a ready-check and silent players
   are replaced from the reserves. Open a lobby now or schedule it, with a reminder before the start. State
@@ -54,10 +63,13 @@ but **the bot's replies are in Portuguese**; this README, the code and the docs 
   Raw ratings are never shown to players.
 - **Optional Riot integration.** Link a League account to seed the rating from the Solo/Duo rank, estimate
   role experience and show recent ranked games.
-- **Test without ten friends.** Mock players and an offline simulator let you try lobbies, results and
-  ranks alone, and tune the matchmaking.
 
-## How it works
+### Name of the day
+
+`/puta` shows today's name, picked at random the first time it is used each day (Europe/Lisbon date; a
+daily task also picks at midnight), and `/putaindor` shows the three most-picked names.
+
+## How Scrims work
 
 ```mermaid
 flowchart LR
@@ -83,7 +95,10 @@ flowchart LR
 
 The formulas, parameters and how teams are scored are in [docs/matchmaking.md](docs/matchmaking.md).
 
-## Quick start
+## Run your own copy
+
+You do not need this to use the bot on the Keep Dreaming server. It is for developing the bot or running a
+fork of it with your own Discord application.
 
 **Requirements:** Python 3.11 or newer and a Discord application with a bot user.
 
@@ -159,7 +174,9 @@ pyright                                 # types
 pytest                                  # tests; add -m "not slow" to skip the long simulations
 ```
 
-Tests need no token and no network. Contributions are welcome: please read [CONTRIBUTING.md](CONTRIBUTING.md).
+Tests need no token and no network. Mock players and an offline simulator let you try Scrims without ten
+people: see [docs/testing.md](docs/testing.md) and [docs/simulations.md](docs/simulations.md). Issues and pull
+requests are welcome; please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ```
 bot/
@@ -199,6 +216,8 @@ Everything else lives in [`docs/`](docs/README.md): the [full command reference]
 the [roster tool](docs/roster-tool.md) and the [Riot data notes](docs/riot-data.md).
 
 ## Roadmap
+
+Scrims, so far. Other features are added as the Keep Dreaming community asks for them.
 
 - [x] Roster, role proficiency, hidden rating and visible in-house rank
 - [x] Optional Riot account linking, rank and ranked history

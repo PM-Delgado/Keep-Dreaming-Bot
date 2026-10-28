@@ -1,7 +1,8 @@
 # Contributing
 
-Thanks for taking an interest in Keep-Dreaming-Bot. It is a hobby project made for one Discord server, so
-changes are reviewed with that in mind: small, tested and in keeping with the existing code.
+Thanks for taking an interest in Keep-Dreaming-Bot. It is the bot of one Discord server, the Keep Dreaming
+community, so what the community wants decides what goes in. Issues and pull requests are welcome; changes
+are reviewed with that in mind: small, tested and in keeping with the existing code.
 
 ## Before you start
 
