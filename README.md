@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/PM-Delgado/Keep-Dreaming-Bot/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/PM-Delgado/Keep-Dreaming-Bot/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue">
   <img alt="discord.py 2.4+" src="https://img.shields.io/badge/discord.py-2.4%2B-5865F2">
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
