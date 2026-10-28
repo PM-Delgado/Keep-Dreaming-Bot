@@ -66,8 +66,8 @@ and the docs are in English.
 
 ### Name of the day
 
-`/puta` shows today's name, picked at random the first time it is used each day (Europe/Lisbon date; a
-daily task also picks at midnight), and `/putaindor` shows the three most-picked names.
+`/goomah` shows today's name, picked at random the first time it is used each day (Europe/Lisbon date; a
+daily task also picks at midnight), and `/goomahdor` shows the three most-picked names.
 
 ## How Scrims work
 
@@ -140,7 +140,7 @@ or private and what it answers, is in [docs/commands.md](docs/commands.md).
 | **Riot accounts** (optional) | `/riot link\|main\|unlink\|list\|history\|refresh` |
 | **Admin** | `/admin player register`, `/admin rating inspect\|set\|rank\|recompute`, `/admin roles set`, `/sync` |
 | **Testing** (`ENABLE_MOCK_PLAYERS`) | `/mock create\|fill\|ready\|drop\|report\|confirm\|stats\|list\|clear` |
-| **Name of the day** | `/puta`, `/putaindor` |
+| **Name of the day** | `/goomah`, `/goomahdor` |
 
 ## Configuration
 

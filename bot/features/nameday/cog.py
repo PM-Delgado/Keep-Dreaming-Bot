@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 FOOTER = "Bada Bing! - Route 17, Lodi, New Jersey"
 PLACEHOLDER = ("—", 0)
+TODAY_DESCRIPTION = "Mostra qual foi a puta escolhida para o dia de hoje."
+LEADERBOARD_DESCRIPTION = "Ranking das putas mais escolhidas."
 
 # The two images live in the repository and are sent with the message (an embed can show an
 # attached file as `attachment://name`), so no web address has to host them.
@@ -69,7 +71,7 @@ class NameDay(commands.Cog):
     async def cog_unload(self) -> None:
         self.daily_pick.cancel()
 
-    # Fires at 00:00 Europe/Lisbon; /puta also picks on demand if the bot missed it.
+    # Fires at 00:00 Europe/Lisbon; /goomah also picks on demand if the bot missed it.
     @tasks.loop(time=dt.time(hour=0, minute=0, tzinfo=LISBON))
     async def daily_pick(self) -> None:
         try:
@@ -79,10 +81,7 @@ class NameDay(commands.Cog):
             return
         log.info("Name of the day: %s", pick.name if pick else "no names available")
 
-    @app_commands.command(
-        name="puta", description="Mostra qual foi a puta escolhida para o dia de hoje."
-    )
-    async def puta(self, interaction: discord.Interaction) -> None:
+    async def _show_today(self, interaction: discord.Interaction) -> None:
         pick = await self.service.get_or_pick_today()
         if pick is None:
             await interaction.response.send_message("Não há nomes disponíveis.", ephemeral=True)
@@ -91,8 +90,7 @@ class NameDay(commands.Cog):
             content=pick.phrase, embed=build_name_embed(pick), file=asset_file(THUMBNAIL)
         )
 
-    @app_commands.command(name="putaindor", description="Ranking das putas mais escolhidas.")
-    async def putaindor(self, interaction: discord.Interaction) -> None:
+    async def _show_leaderboard(self, interaction: discord.Interaction) -> None:
         leaderboard = await self.service.leaderboard(3)
         if not leaderboard:
             await interaction.response.send_message(
@@ -102,6 +100,24 @@ class NameDay(commands.Cog):
         await interaction.response.send_message(
             embed=build_leaderboard_embed(leaderboard), file=asset_file(IMAGE)
         )
+
+    # Each command exists under two names (a reference to The Sopranos, and the original): both run
+    # the same code, so they can never drift apart. The documentation only mentions the first name.
+    @app_commands.command(name="goomah", description=TODAY_DESCRIPTION)
+    async def goomah(self, interaction: discord.Interaction) -> None:
+        await self._show_today(interaction)
+
+    @app_commands.command(name="puta", description=TODAY_DESCRIPTION)
+    async def puta(self, interaction: discord.Interaction) -> None:
+        await self._show_today(interaction)
+
+    @app_commands.command(name="goomahdor", description=LEADERBOARD_DESCRIPTION)
+    async def goomahdor(self, interaction: discord.Interaction) -> None:
+        await self._show_leaderboard(interaction)
+
+    @app_commands.command(name="putaindor", description=LEADERBOARD_DESCRIPTION)
+    async def putaindor(self, interaction: discord.Interaction) -> None:
+        await self._show_leaderboard(interaction)
 
 
 async def setup(bot: "KDBot") -> None:

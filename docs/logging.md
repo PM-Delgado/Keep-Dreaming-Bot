@@ -5,7 +5,7 @@ file is `kdbot.log.<date>`). Each line is `date time LEVEL logger: message`.
 
 * **Startup:** the switches in effect (never a token or key), the database file, its schema
   version and how many names, phrases, players, lobbies, games and champions it holds, each
-  migration, the seeds loaded into an empty `/puta`, each feature loaded, the command sync, and
+  migration, the seeds loaded into an empty `/goomah`, each feature loaded, the command sync, and
   `Ready` with the server name. Shutdown is logged too.
 * **Every command, button and form:**
   `/lobby open by ana (123) in #scrims (456) [lobby_id=3] -> ok 84ms`. The outcome is `ok`,

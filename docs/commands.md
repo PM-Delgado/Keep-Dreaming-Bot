@@ -86,7 +86,9 @@ on `/leaderboard`.
 
 | Command | Reply | What it does |
 |---|---|---|
-| `/puta` | public | Today's name (Europe/Lisbon date); picked at random on first use of the day. |
-| `/putaindor` | public | Podium of the three most-picked names. |
+| `/goomah` | public | Today's name (Europe/Lisbon date); picked at random on first use of the day. |
+| `/goomahdor` | public | Podium of the three most-picked names. |
+
+Both commands also answer to their original names; the answer is identical.
 
 A daily task also makes the pick at 00:00 Europe/Lisbon.

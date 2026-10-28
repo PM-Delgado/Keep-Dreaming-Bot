@@ -22,6 +22,8 @@ async def test_registers_exactly_the_expected_commands():
             await bot.unload_extension(ext)
         await bot.db.close()
     assert names == {
+        "goomah",
+        "goomahdor",
         "puta",
         "putaindor",
         "sync",
