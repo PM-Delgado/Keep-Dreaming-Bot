@@ -14,23 +14,26 @@
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="Linted with ruff" src="https://img.shields.io/badge/lint-ruff-261230">
   <img alt="Type-checked with pyright" src="https://img.shields.io/badge/types-pyright-informational">
+  <a href="https://railway.com"><img alt="Hosted on Railway" src="https://img.shields.io/badge/hosted_on-Railway-0B0D0E?logo=railway&logoColor=white"></a>
 </p>
 
 <p align="center">
-  <a href="#what-it-does-today">What it does</a> ·
-  <a href="#how-scrims-work">How Scrims work</a> ·
-  <a href="#run-your-own-copy">Run your own copy</a> ·
-  <a href="#commands">Commands</a> ·
-  <a href="#configuration">Configuration</a> ·
+  <a href="#-what-it-does-today">What it does</a> ·
+  <a href="#-how-scrims-work">How Scrims work</a> ·
+  <a href="#-run-your-own-copy">Run your own copy</a> ·
+  <a href="#-commands">Commands</a> ·
+  <a href="#-configuration">Configuration</a> ·
   <a href="docs/README.md">Docs</a>
 </p>
 
-## What it is
+## 📖 What it is
 
 Keep-Dreaming-Bot is the bot of the **Keep Dreaming** Discord server. It is made for that community and
 runs there every day. It is not a public bot (there is no invite link) and it is not meant to be a
 general-purpose matchmaking product: it is the server's own bot, and it does whatever the community has
-wanted so far.
+wanted so far. It runs 24/7 on [Railway](https://railway.com) as a single worker service, deployed
+straight from the `main` branch of this repository (every merge redeploys it), with its SQLite database on
+a persistent volume.
 
 It started as a "name of the day" joke and has grown one feature at a time. It currently does two things,
 and gets more as the server asks for them:
@@ -40,13 +43,13 @@ and gets more as the server asks for them:
   and stats.
 
 The code is open so anyone can read it, learn from it or fork it. Running your own copy is possible (see
-[below](#run-your-own-copy)) but it is not the goal, and the server's choices are built in: **the bot's
+[below](#-run-your-own-copy)) but it is not the goal, and the server's choices are built in: **the bot's
 replies are in Portuguese**, and the Scrims ranks and names are the community's own. This README, the code
 and the docs are in English.
 
-## What it does today
+## ✨ What it does today
 
-### Scrims
+### 🎮 Scrims
 
 - **In-house lobbies.** One live message with buttons. Ten players start a ready-check and silent players
   are replaced from the reserves. Open a lobby now or schedule it, with a reminder before the start. State
@@ -64,12 +67,12 @@ and the docs are in English.
 - **Optional Riot integration.** Link a League account to seed the rating from the Solo/Duo rank, estimate
   role experience and show recent ranked games.
 
-### Name of the day
+### 📅 Name of the day
 
 `/goomah` shows today's name, picked at random the first time it is used each day (Europe/Lisbon date; a
 daily task also picks at midnight), and `/goomahdor` shows the three most-picked names.
 
-## How Scrims work
+## 🧩 How Scrims work
 
 ```mermaid
 flowchart LR
@@ -95,7 +98,7 @@ flowchart LR
 
 The formulas, parameters and how teams are scored are in [docs/matchmaking.md](docs/matchmaking.md).
 
-## Run your own copy
+## 🚀 Run your own copy
 
 You do not need this to use the bot on the Keep Dreaming server. It is for developing the bot or running a
 fork of it with your own Discord application.
@@ -127,7 +130,7 @@ On start-up the bot creates the SQLite database, applies pending migrations and 
 your server. To try a lobby alone, set `ENABLE_MOCK_PLAYERS=true` and `ADMIN_USER_IDS` to your own user ID,
 then follow [docs/testing.md](docs/testing.md). To keep it running, see [docs/self-hosting.md](docs/self-hosting.md).
 
-## Commands
+## 💬 Commands
 
 All commands are slash commands, registered only in the configured server. Commands marked *admin* need
 your Discord user ID in `ADMIN_USER_IDS`. Every command, with who can run it, whether the reply is public
@@ -142,7 +145,7 @@ or private and what it answers, is in [docs/commands.md](docs/commands.md).
 | **Testing** (`ENABLE_MOCK_PLAYERS`) | `/mock create\|fill\|ready\|drop\|report\|confirm\|stats\|list\|clear` |
 | **Name of the day** | `/goomah`, `/goomahdor` |
 
-## Configuration
+## 🔧 Configuration
 
 Read once at start-up from the environment or `.env` (`bot/config.py`; see `.env.example`).
 
@@ -166,7 +169,7 @@ Everything is stored in one SQLite file. Back it up while the bot is stopped (or
 [docs/self-hosting.md](docs/self-hosting.md#backups)). Schema changes are versioned migrations in `bot/db.py`,
 applied automatically; an applied migration is never edited.
 
-## Development
+## 💻 Development
 
 ```bash
 ruff check . && ruff format --check .   # lint and formatting
@@ -208,14 +211,14 @@ python -m bot.features.simulation scenario all                     # how the bal
 python -m bot.features.simulation season --players 14 --games 40   # a whole simulated season
 ```
 
-## Documentation
+## 📚 Documentation
 
 Everything else lives in [`docs/`](docs/README.md): the [full command reference](docs/commands.md),
 [how ratings and matchmaking work](docs/matchmaking.md), [self-hosting](docs/self-hosting.md),
 [logging](docs/logging.md), [testing by hand](docs/testing.md), [simulations](docs/simulations.md),
 the [roster tool](docs/roster-tool.md) and the [Riot data notes](docs/riot-data.md).
 
-## Roadmap
+## 🧭 Roadmap
 
 Scrims, so far. Other features are added as the Keep Dreaming community asks for them.
 
@@ -228,13 +231,13 @@ Scrims, so far. Other features are added as the Keep Dreaming community asks for
 - [x] Match history, personal stats and leaderboards
 - [ ] Optional captain draft
 
-## Acknowledgements
+## 🙏 Acknowledgements
 
 Built with [discord.py](https://github.com/Rapptz/discord.py) and [OpenSkill](https://github.com/OpenDebates/openskill.py)
 for the team ratings. Champion data and icons come from Riot's Data Dragon, and the role icons from
 [Community Dragon](https://www.communitydragon.org).
 
-## Riot Games disclaimer
+## 📜 Riot Games disclaimer
 
 Keep-Dreaming-Bot isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or
 anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated
@@ -242,6 +245,6 @@ properties are trademarks or registered trademarks of Riot Games, Inc. The in-ho
 the group and are not League of Legends ranks. See [docs/riot-data.md](docs/riot-data.md) for how Riot data
 is used.
 
-## License
+## 📝 License
 
 Released under the [MIT License](LICENSE).
