@@ -1,5 +1,8 @@
 # Self-hosting
 
+You do not need this to use the bot on the Keep Dreaming server, where it is already running. It is for
+running a fork or a development copy with your own Discord application.
+
 The bot is a single long-running process: `python -m bot`. It needs outbound internet access (Discord,
 and optionally Riot and Data Dragon), no open port and no web address, and a place to keep one SQLite
 file. Anything that can run a Python worker works: a VPS, a Raspberry Pi, Docker, or a platform such as

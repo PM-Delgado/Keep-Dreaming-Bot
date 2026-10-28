@@ -1,6 +1,6 @@
 # Documentation
 
-The project [README](../README.md) gives the overview, the quick start and the configuration. These
+The project [README](../README.md) gives the overview, how to run a copy and the configuration. These
 documents hold the detail.
 
 ## Use the bot
