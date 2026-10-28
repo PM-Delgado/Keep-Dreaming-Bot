@@ -74,6 +74,7 @@ def test_invalid_log_level_raises():
 def test_the_startup_summary_names_the_switches_but_not_the_secrets():
     text = KDBot(load_settings(ENV)).describe_settings()
     assert "riot=on" in text and "mock_players=off" in text and "guild=123" in text
+    assert "scrim_channel=off" in text and "scrim_role=off" in text
     assert "SECRET-TOKEN" not in text and "RGAPI" not in text
 
 

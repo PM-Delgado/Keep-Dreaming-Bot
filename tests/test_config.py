@@ -64,3 +64,18 @@ def test_champion_icons_are_on_unless_turned_off():
     assert load_settings({**VALID, "CHAMPION_ICONS": "true"}).champion_icons is True
     for off in ("false", "0", "no", "off", ""):
         assert load_settings({**VALID, "CHAMPION_ICONS": off}).champion_icons is False, off
+
+
+def test_scrim_channel_and_role_are_optional_numeric_ids():
+    unset = load_settings(VALID)
+    assert unset.scrim_channel_id is None and unset.scrim_role_id is None
+    blank = load_settings({**VALID, "SCRIM_CHANNEL_ID": " ", "SCRIM_ROLE_ID": ""})
+    assert blank.scrim_channel_id is None and blank.scrim_role_id is None
+    s = load_settings({**VALID, "SCRIM_CHANNEL_ID": "1234567890123456", "SCRIM_ROLE_ID": " 99 "})
+    assert (s.scrim_channel_id, s.scrim_role_id) == (1234567890123456, 99)
+
+
+@pytest.mark.parametrize("name", ["SCRIM_CHANNEL_ID", "SCRIM_ROLE_ID"])
+def test_a_scrim_id_that_is_not_a_number_is_refused(name):
+    with pytest.raises(ConfigError, match=name):
+        load_settings({**VALID, name: "#scrim"})
