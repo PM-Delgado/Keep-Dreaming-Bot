@@ -1,7 +1,7 @@
 [project]
 name = "keep-dreaming-bot"
 version = "0.2.0"
-description = "Private Discord bot for a friends' server."
+description = "Discord bot for League of Legends in-house games: balanced lobbies, results, ratings and stats."
 requires-python = ">=3.11"
 dependencies = [
     "discord.py>=2.4",

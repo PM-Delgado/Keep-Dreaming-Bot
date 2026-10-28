@@ -132,7 +132,7 @@ Without the key every `/riot` command answers that the integration is disabled.
 | `/riot main <riot_id> [player]` | private | Choose which account supplies the rank. |
 | `/riot unlink <riot_id> [player]` | private | Remove an account and all data tied to it. |
 | `/riot list [player]` | public | Large heading `Contas Riot · Name` with the avatar and the tier-coloured side bar; one line per account (★ = main, games stored, last sync); no footer. |
-| `/riot refresh [player]` | private | Refresh names, rank and ranked history right now (10 minute cooldown for players; admins skip it). Rarely needed: profile views, ready-checks and a 6-hourly timer already refresh automatically (see `docs/riot-policy.md`). |
+| `/riot refresh [player]` | private | Refresh names, rank and ranked history right now (10 minute cooldown for players; admins skip it). Rarely needed: profile views, ready-checks and a 6-hourly timer already refresh automatically (see [docs/riot-data.md](docs/riot-data.md)). |
 | `/riot history [player] [riot_id]` | public | Heading `Solo/Duo · Name` with the avatar and tier colour, `Jogos: 6V 4D (60%) · KDA: 3.25`, then the last ten ranked Solo/Duo games (one line each: result, champion and role icons, KDA, CS, duration; a ★ in front of the games played on the main account, no account names); a small line says when it was last updated. If an account's history is older than 5 minutes the bot first asks Riot for new games (up to 4 seconds; the answer then arrives as a reply to "thinking..."); a Riot failure never blocks it. |
 
 ### Admin
@@ -333,7 +333,7 @@ Read once at startup from the environment or `.env` (`bot/config.py`).
 | `RIOT_API_KEY` | no | | Enables the `/riot` commands. Without it ranks and roles are set manually. |
 | `RIOT_DEFAULT_PLATFORM` | no | `euw1` | Platform used when `/riot link` does not specify one. |
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
-| `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis) in lobbies, `/match show`, `/profile` and `/riot history`; names are used where an icon is missing. `false` turns them off; see `docs/riot-policy.md`. |
+| `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis) in lobbies, `/match show`, `/profile` and `/riot history`; names are used where an icon is missing. `false` turns them off; see [docs/riot-data.md](docs/riot-data.md). |
 | `SCRIM_CHANNEL_ID` | no | any channel | The only channel where `/lobby open`, `/lobby schedule` and `/lobby show` work. |
 | `SCRIM_ROLE_ID` | no | no tag | The role tagged (inside a spoiler) when a lobby is opened or scheduled. It must be mentionable, or the bot needs the "Mention @everyone, @here and All Roles" permission; the start-up log says if it is not. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
@@ -394,7 +394,7 @@ bot/
     roster/        roster file, seeding, test games with the real players, reset (not loaded by the bot)
 tests/             pytest, in-memory SQLite
 tools/             dev-only scripts (ladder_sim.py) and the roster file template
-docs/              internal documentation
+docs/              documentation
 ```
 
 Each feature keeps Discord out of its rules: `service.py` holds the logic, `repository.py` the SQL,
@@ -411,13 +411,11 @@ python -m bot.features.simulation tune baseline                # the tuning lab
 
 ## Documentation
 
-The internal documentation lives in [`docs/`](docs/README.md):
+The documentation lives in [`docs/`](docs/README.md):
 
-- [Status and hand-off](docs/status.md): what is done, what is left, agreed designs.
-- [Ratings, ranks and matchmaking](docs/matchmaking.md): how it all works in detail.
+- [Ratings, ranks and matchmaking](docs/matchmaking.md): how it all works in detail, and how the settings were chosen.
 - [Simulations](docs/simulations.md): how to test and tune without Discord.
-- [Tuning](docs/tuning.md): how the settings were chosen, with results.
-- [Deploying on Railway](docs/deploy.md), [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot policy notes](docs/riot-policy.md).
+- [Testing lobbies by hand](docs/testing-lobbies.md) (and the [command checklist](#testing-the-commands) above) and [Riot data notes](docs/riot-data.md).
 
 ## Roadmap
 
@@ -436,9 +434,8 @@ Keep-Dreaming-Bot isn't endorsed by Riot Games and doesn't reflect the views or 
 Games or anyone officially involved in producing or managing Riot Games properties. Riot Games, and
 all associated properties are trademarks or registered trademarks of Riot Games, Inc. The in-house
 ranks are internal to the group and are not League of Legends ranks. See
-[docs/riot-policy.md](docs/riot-policy.md) for how Riot data is used.
+[docs/riot-data.md](docs/riot-data.md) for how Riot data is used.
 
 ## License
 
-No license has been chosen yet, so by default all rights are reserved. Add a `LICENSE` file before
-accepting contributions.
+Released under the [MIT License](LICENSE).

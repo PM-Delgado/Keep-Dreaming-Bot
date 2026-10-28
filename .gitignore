@@ -12,6 +12,8 @@ __pycache__/
 # Editor / local tooling
 .vscode/
 .idea/
+.claude/
+graphify-out/
 .venv/
 .pytest_cache/
 .ruff_cache/
@@ -21,8 +23,6 @@ build/
 dist/
 .coverage
 htmlcov/
-.claude/settings.local.json
-graphify-out/
 
 # Runtime data (SQLite database, backups, WAL files)
 data/
@@ -33,12 +33,15 @@ data/
 *.log
 logs/
 
-# Manual-test screenshots and other local artefacts (can contain Discord names)
-m1a-screenshots-test/
+# Manual-test screenshots (can contain Discord names)
 *screenshots*/
 
-# Personal scripts
-aws_connect.bat
+# Local-only working notes: assistant instructions, hand-off status, deployment runbook and the
+# Riot policy analysis (kept on the maintainer's disk, not published)
+CLAUDE.md
+docs/status.md
+docs/deploy.md
+docs/riot-policy.md
 
 # OS junk
 .DS_Store
