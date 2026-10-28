@@ -130,7 +130,7 @@ Texts are in Portuguese, as the bot shows them.
 | `/admin rating set`, `/admin rating rank`, `/admin roles set`, `/admin rating recompute` | Private one-line confirmations; "🔄 Ratings reconstruídos." for recompute. |
 | `/sync` | Private: "🔄 Sincronizados n comandos." (bot owner only; anyone else is refused). |
 | A non-admin running an admin command | Private: "⛔ Não tens permissão para usar este comando." An unexpected failure: "💥 Ocorreu um erro inesperado. Tenta novamente mais tarde." |
-| `/puta`, `/putaindor` | Public name-of-the-day embeds ("Ainda não há ranking; usa /puta para começar." before any pick). |
+| `/goomah`, `/goomahdor` | Public name-of-the-day embeds ("Ainda não há ranking; usa /puta para começar." before any pick). |
 
 ## Cleaning up
 

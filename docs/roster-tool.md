@@ -16,7 +16,7 @@ writes makes a backup copy next to the database, `*.sqlite3.bak-<time>-<reason>`
    services as `/register`, `/profile rank` and `/profile roles`, and links the Riot accounts through
    the real `/riot link` process (needs `RIOT_API_KEY`; with `--no-riot` they are skipped). It can be
    run again: players already there are kept, only a changed rank or role is applied, and accounts
-   already linked are skipped. The `/puta` names, phrases and history are never touched.
+   already linked are skipped. The `/goomah` names, phrases and history are never touched.
    It prints each player as it goes and finishes in a couple of minutes. The ranked-history download
    (up to 100 games per account, about one request every two seconds on a personal key) is *not*
    done here: the bot continues it in the background when it starts. `--wait-history` does it now
@@ -40,15 +40,15 @@ writes makes a backup copy next to the database, `*.sqlite3.bak-<time>-<reason>`
 6. **Go back to a clean database.** `python -m bot.features.roster reset` shows what would be removed
    and changes nothing; with `--yes` it deletes **all league data**: players, roles, ranks, Riot
    accounts and their stored games, ratings, lobbies, games and mock players. Run `seed` afterwards
-   to put the roster back. The `/puta` names, phrases and picks, the champion list and the uploaded
+   to put the roster back. The `/goomah` names, phrases and picks, the champion list and the uploaded
    icon ids always stay. `reset --keep-roster --yes` is the lighter version: it removes only the test
    games, lobbies, rating adjustments and mock players and keeps the roster (use it to replay `games`).
 
 7. **Prepare the database for production.** `python -m bot.features.roster production` shows the
    plan and changes nothing; with `--yes` it makes a backup and then, in one go: deletes all league
-   data (test games, lobbies, mock players, rating adjustments), **clears the daily `/puta` picks**,
+   data (test games, lobbies, mock players, rating adjustments), **clears the daily `/goomah` picks**,
    seeds the roster again (links the Riot accounts, so it needs `RIOT_API_KEY`; `--no-riot` skips
-   them) and checks the result table by table. The `/puta` names and phrases are kept exactly as
+   them) and checks the result table by table. The `/goomah` names and phrases are kept exactly as
    they are (on an empty database they come from `bot/features/nameday/seed/*.json`), and so are
    the champion list and icon ids. The check ends with `Ready.` or the `FAIL` lines to fix: integrity,
    foreign keys, names and phrases present, no picks, every player of the file registered with a
