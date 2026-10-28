@@ -34,7 +34,8 @@ pyright
 pytest                 # add -m "not slow" to skip the long simulations
 ```
 
-All three must pass. Add or update tests for changed behaviour; business logic is tested without Discord
+All three must pass; the same checks run on GitHub for every push and pull request, on Python 3.11 and 3.13.
+Add or update tests for changed behaviour; business logic is tested without Discord
 (use mock interactions where needed). If you change a command, its options or its output, update
 [docs/commands.md](docs/commands.md) and the README in the same pull request.
 

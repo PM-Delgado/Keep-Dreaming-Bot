@@ -1,0 +1,25 @@
+name: Feature or change request
+description: Suggest something the bot could do, or a change to how it behaves
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The Keep Dreaming community decides what the bot does, so this is a suggestion, not a promise.
+        Anything that changes ratings or matchmaking is discussed here before it is built.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve
+      description: Describe the situation first, then the idea.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like to happen
+      description: How it would work for the players, for example the command and what it answers.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

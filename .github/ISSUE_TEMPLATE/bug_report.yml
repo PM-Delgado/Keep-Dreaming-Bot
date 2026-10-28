@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in the bot or the code does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. This is the bot of one Discord server, so please keep it to bugs in the code.
+        **Security problems do not belong here**: see the [security policy](https://github.com/PM-Delgado/Keep-Dreaming-Bot/security/policy).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: The command and options you ran, or the steps, and whether `ENABLE_MOCK_PLAYERS` was on.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: From `logs/kdbot.log` or the console. Remove tokens and any IDs you do not want to share.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit hash (`git rev-parse --short HEAD`) and your Python version.

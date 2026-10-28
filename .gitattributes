@@ -1,0 +1,5 @@
+# Keep text files as LF in the repository whatever the contributor's OS or git settings.
+* text=auto
+
+*.png binary
+*.jpg binary
