@@ -103,10 +103,10 @@ every error message is private). Commands marked *admin* need your Discord user 
 
 | Command | Reply | What it does |
 |---|---|---|
-| `/lobby open` | public | Open the server's Scrim lobby in this channel (a live message with buttons and a progress bar of the 10 places). |
-| `/lobby schedule <when> [note]` | public | Schedule a lobby (Lisbon time, e.g. `21:00`, `21h30`, `amanhã 21:00`, `sexta 21:00`, `15/08 21:00`, `2026-08-15 21:00`). A reminder goes out 30 minutes before. |
+| `/lobby open` | public | Open the server's Scrim lobby in this channel (a live message with buttons and a progress bar of the 10 places). With `SCRIM_CHANNEL_ID` set it only works in that channel (elsewhere: a private error naming it), and with `SCRIM_ROLE_ID` set the message starts with the role tagged inside a spoiler, which still notifies it. |
+| `/lobby schedule <when> [note]` | public | Schedule a lobby (Lisbon time, e.g. `21:00`, `21h30`, `amanhã 21:00`, `sexta 21:00`, `15/08 21:00`, `2026-08-15 21:00`). A reminder goes out 30 minutes before. Same channel limit and spoiler-tagged role as `/lobby open`. |
 | `/lobby list` | public | Heading `📋 Scrims`, then the open lobby and the scheduled ones (status emoji each); a friendly message when there are none. |
-| `/lobby show [lobby]` | public | Re-post a lobby message here (the stale copy is removed). |
+| `/lobby show [lobby]` | public | Re-post a lobby message here (the stale copy is removed; no new tag). Same channel limit. |
 | `/lobby cancel [lobby]` | private | Cancel a lobby (its creator or an admin). |
 | `/match show [match]` | public | Large heading `🏆 Jogo #n · Confirmado`, the winner, teams (role icon, name, champion icon, KDA, ⏳ = pending); a confirmed game takes the winning side's colour; a small line at the bottom says who confirmed the result and who validated the KDAs. Default: the latest game. |
 | `/match stats <champion> <kills> <deaths> <assists> [match]` | private | Record your own champion (autocomplete) and KDA (0-99) for a confirmed game; default: your latest game without validated stats. Waits for an admin to validate it. |
@@ -334,6 +334,8 @@ Read once at startup from the environment or `.env` (`bot/config.py`).
 | `RIOT_DEFAULT_PLATFORM` | no | `euw1` | Platform used when `/riot link` does not specify one. |
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
 | `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis) in lobbies, `/match show`, `/profile` and `/riot history`; names are used where an icon is missing. `false` turns them off; see `docs/riot-policy.md`. |
+| `SCRIM_CHANNEL_ID` | no | any channel | The only channel where `/lobby open`, `/lobby schedule` and `/lobby show` work. |
+| `SCRIM_ROLE_ID` | no | no tag | The role tagged (inside a spoiler) when a lobby is opened or scheduled. It must be mentionable, or the bot needs the "Mention @everyone, @here and All Roles" permission; the start-up log says if it is not. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
 | `LOG_DIR` | no | `logs` | Folder of the log file `kdbot.log` (a new file every midnight, 14 days kept). Empty: console only. |

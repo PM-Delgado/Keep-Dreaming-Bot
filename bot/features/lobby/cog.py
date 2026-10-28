@@ -1,7 +1,7 @@
 """/lobby commands, the lobby buttons' behaviour, the deadline sweeper, and /mock test commands."""
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -98,6 +98,7 @@ class Lobby(commands.Cog):
     @sweeper.before_loop
     async def _before_sweeper(self) -> None:
         await self.bot.wait_until_ready()
+        self._check_scrim_setup()
         active = await self.service.repo.list_by_status(list(ACTIVE))
         log.info(
             "Lobby sweeper running every %ds; %d active lobbies carried over: %s",
@@ -105,6 +106,39 @@ class Lobby(commands.Cog):
             len(active),
             ", ".join(f"#{lobby.id} {lobby.status}" for lobby in active) or "none",
         )
+
+    # --- the scrim channel and role ----
+
+    def _require_scrim_channel(self, interaction: discord.Interaction) -> None:
+        """Lobbies are only opened where the group looks for them (when a channel is configured)."""
+        wanted = self.bot.settings.scrim_channel_id
+        if wanted is not None and interaction.channel_id != wanted:
+            raise PlayerError(f"As lobbies de Scrims só se abrem no canal <#{wanted}>.")
+
+    def _scrim_tag(self) -> dict:
+        """The role tag of a new or scheduled lobby: a mention hidden in a spoiler (it still
+        notifies). It is the message's text, so later edits of the lobby message keep it without
+        notifying again."""
+        role = self.bot.settings.scrim_role_id
+        if role is None:
+            return {}
+        return {
+            "content": f"||<@&{role}>||",
+            "allowed_mentions": discord.AllowedMentions(roles=[discord.Object(id=role)]),
+        }
+
+    def _check_scrim_setup(self) -> None:
+        """At start-up: say in the log whether the channel and role are usable."""
+        s = self.bot.settings
+        if s.scrim_channel_id is None and s.scrim_role_id is None:
+            return
+        problems = scrim_setup_problems(
+            self.bot.get_guild(s.guild_id), s.scrim_channel_id, s.scrim_role_id
+        )
+        if not problems:
+            log.info("Scrim channel and role are set up: lobbies are announced there.")
+        for problem in problems:
+            log.warning("Scrim setup: %s", problem)
 
     # --- messages ----
 
@@ -229,6 +263,7 @@ class Lobby(commands.Cog):
             await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
             return
         try:
+            self._require_scrim_channel(interaction)
             update = await self.service.open(
                 interaction.guild_id, interaction.channel_id, interaction.user.id
             )
@@ -236,7 +271,9 @@ class Lobby(commands.Cog):
             log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        await interaction.response.send_message(**self.message_kwargs(update.snapshot))
+        await interaction.response.send_message(
+            **self.message_kwargs(update.snapshot), **self._scrim_tag()
+        )
         sent = await interaction.original_response()
         await self.service.attach_message(update.snapshot.lobby.id, sent.id, interaction.channel_id)
 
@@ -263,6 +300,7 @@ class Lobby(commands.Cog):
             await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
             return
         try:
+            self._require_scrim_channel(interaction)
             update = await self.service.schedule(
                 interaction.guild_id, interaction.channel_id, interaction.user.id, when, note
             )
@@ -270,7 +308,9 @@ class Lobby(commands.Cog):
             log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        await interaction.response.send_message(**self.message_kwargs(update.snapshot))
+        await interaction.response.send_message(
+            **self.message_kwargs(update.snapshot), **self._scrim_tag()
+        )
         sent = await interaction.original_response()
         await self.service.attach_message(update.snapshot.lobby.id, sent.id, interaction.channel_id)
 
@@ -291,6 +331,12 @@ class Lobby(commands.Cog):
     async def show_lobby(self, interaction: discord.Interaction, lobby: int | None = None) -> None:
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
+            return
+        try:
+            self._require_scrim_channel(interaction)  # /lobby show posts the lobby again
+        except PlayerError as exc:
+            log_refusal(interaction, exc)
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
         lobby_row = await self._resolve(interaction, lobby)
         if lobby_row is None:
@@ -734,6 +780,35 @@ class Lobby(commands.Cog):
         await interaction.response.send_message(
             f"{removed} jogadores de teste apagados.", ephemeral=True
         )
+
+
+def scrim_setup_problems(guild: Any, channel_id: int | None, role_id: int | None) -> list[str]:
+    """What would stop the scrim channel or role from working (empty when all is well)."""
+    if guild is None:
+        return ["the bot is not in the configured server"]
+    problems: list[str] = []
+    me = guild.me
+    if channel_id is not None:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            problems.append(f"SCRIM_CHANNEL_ID {channel_id} is not a channel of the server")
+        else:
+            perms = channel.permissions_for(me)
+            missing = [
+                n for n in ("view_channel", "send_messages", "embed_links") if not getattr(perms, n)
+            ]
+            if missing:
+                problems.append(f"the bot lacks {', '.join(missing)} in the scrim channel")
+    if role_id is not None:
+        role = guild.get_role(role_id)
+        if role is None:
+            problems.append(f"SCRIM_ROLE_ID {role_id} is not a role of the server")
+        elif not role.mentionable and not me.guild_permissions.mention_everyone:
+            problems.append(
+                "the scrim role is not mentionable and the bot lacks the permission to mention "
+                "every role: the tag will not notify anyone"
+            )
+    return problems
 
 
 async def setup(bot: "KDBot") -> None:

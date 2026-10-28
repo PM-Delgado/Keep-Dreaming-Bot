@@ -1,5 +1,6 @@
 """Lobby commands, buttons, pings, sweeper and rendering, against a fake Discord."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,7 +11,7 @@ from lobby_fakes import ADMIN, CHANNEL, GUILD, START, LobbyStack, sides_of, star
 from bot.app import EXTENSIONS, KDBot
 from bot.config import load_settings
 from bot.features.icons.roles import RoleEmojiRepository, RoleIconService
-from bot.features.lobby.cog import Lobby
+from bot.features.lobby.cog import Lobby, scrim_setup_problems
 from bot.features.lobby.mock import MockPlayers
 from bot.features.lobby.render import (
     band_text,
@@ -1155,3 +1156,115 @@ def test_the_pending_list_and_the_empty_lobby_list_have_headings_and_a_friendly_
     assert "-# Valida com /match validate" in (pending.description or "")
     assert "Tudo em dia" in (build_pending_embed([]).description or "")
     assert (build_list_embed(None, []).description or "").startswith("# 📋 Scrims")
+
+
+# --- the scrim channel and role ----
+
+SCRIM_ROLE = 4242
+OTHER_CHANNEL = CHANNEL + 1
+
+
+def scrim_on(env, channel: int | None = CHANNEL, role: int | None = SCRIM_ROLE) -> None:
+    env.bot.settings = replace(env.bot.settings, scrim_channel_id=channel, scrim_role_id=role)
+
+
+async def test_without_a_scrim_setup_lobbies_open_anywhere_and_tag_nobody(env):
+    await env.stack.register(1)
+    ix = FakeInteraction(1)
+    ix.channel_id = OTHER_CHANNEL
+    await env.cog.open_lobby.callback(env.cog, ix)
+    posted = ix.sent[0]
+    assert posted["content"] is None and "allowed_mentions" not in posted
+
+
+async def test_a_lobby_can_only_be_opened_in_the_scrim_channel(env):
+    scrim_on(env)
+    await env.stack.register(1)
+    ix = FakeInteraction(1)
+    ix.channel_id = OTHER_CHANNEL
+    await env.cog.open_lobby.callback(env.cog, ix)
+    assert ix.sent[0]["ephemeral"] is True
+    assert f"<#{CHANNEL}>" in ix.sent[0]["content"]
+    assert await env.stack.lobbies.open_lobby(GUILD) is None  # nothing was created
+
+
+async def test_opening_a_lobby_tags_the_role_hidden_in_a_spoiler(env):
+    scrim_on(env)
+    await env.stack.register(1)
+    ix = FakeInteraction(1)
+    await env.cog.open_lobby.callback(env.cog, ix)
+    posted = ix.sent[0]
+    assert posted["content"] == f"||<@&{SCRIM_ROLE}>||"  # a spoiler still notifies the role
+    allowed = posted["allowed_mentions"]
+    assert [r.id for r in allowed.roles] == [SCRIM_ROLE]  # only this role may be pinged
+    assert allowed.users  # the default for users is untouched
+    assert posted["embed"] is not None and posted["view"] is not None  # the lobby itself is intact
+
+
+async def test_scheduling_a_lobby_is_limited_to_the_channel_and_tags_the_role(env):
+    scrim_on(env)
+    await env.stack.register(1)
+    wrong = FakeInteraction(1)
+    wrong.channel_id = OTHER_CHANNEL
+    await env.cog.schedule_lobby.callback(env.cog, wrong, WHEN, None)
+    assert wrong.sent[0]["ephemeral"] is True and f"<#{CHANNEL}>" in wrong.sent[0]["content"]
+    assert await env.stack.lobbies.list_scheduled(GUILD) == []
+    ix = FakeInteraction(1)
+    await env.cog.schedule_lobby.callback(env.cog, ix, WHEN, None)
+    assert ix.sent[0]["content"] == f"||<@&{SCRIM_ROLE}>||"
+    assert [r.id for r in ix.sent[0]["allowed_mentions"].roles] == [SCRIM_ROLE]
+    assert len(await env.stack.lobbies.list_scheduled(GUILD)) == 1
+
+
+async def test_show_reposts_only_in_the_scrim_channel_and_without_tagging_again(env):
+    await open_as(env)
+    scrim_on(env)
+    elsewhere = FakeInteraction(5)
+    elsewhere.channel_id = OTHER_CHANNEL
+    await env.cog.show_lobby.callback(env.cog, elsewhere)
+    assert (
+        elsewhere.sent[0]["ephemeral"] is True and f"<#{CHANNEL}>" in elsewhere.sent[0]["content"]
+    )
+    ix = FakeInteraction(5)
+    ix._original = FakeMessage(888)
+    await env.cog.show_lobby.callback(env.cog, ix)
+    assert ix.sent[0]["embed"] is not None
+    assert ix.sent[0]["content"] is None  # a copy of the message is not a new announcement
+
+
+async def test_updating_the_lobby_message_neither_tags_nor_removes_the_tag(env):
+    scrim_on(env)
+    lobby_id, message_id = await open_as(env)
+    snapshot = await env.stack.lobbies.snapshot(lobby_id)
+    await env.cog.refresh_message(snapshot)
+    edit = env.channel.messages[message_id].edits[-1]
+    assert "content" not in edit and "allowed_mentions" not in edit  # the spoiler stays, silently
+
+
+def test_scrim_setup_problems_are_reported_in_plain_words():
+    def guild(channel_perms=(True, True, True), mentionable=True, can_mention=False, found=True):
+        perms = SimpleNamespace(
+            view_channel=channel_perms[0],
+            send_messages=channel_perms[1],
+            embed_links=channel_perms[2],
+        )
+        channel = SimpleNamespace(permissions_for=lambda _me: perms)
+        role = SimpleNamespace(mentionable=mentionable)
+        return SimpleNamespace(
+            me=SimpleNamespace(guild_permissions=SimpleNamespace(mention_everyone=can_mention)),
+            get_channel=lambda _id: channel if found else None,
+            get_role=lambda _id: role if found else None,
+        )
+
+    assert scrim_setup_problems(guild(), 1, 2) == []
+    assert scrim_setup_problems(None, 1, 2) == ["the bot is not in the configured server"]
+    assert scrim_setup_problems(guild(found=False), 1, 2) == [
+        "SCRIM_CHANNEL_ID 1 is not a channel of the server",
+        "SCRIM_ROLE_ID 2 is not a role of the server",
+    ]
+    [missing] = scrim_setup_problems(guild(channel_perms=(True, False, False)), 1, None)
+    assert "send_messages" in missing and "embed_links" in missing
+    [silent] = scrim_setup_problems(guild(mentionable=False), None, 2)
+    assert "will not notify" in silent
+    assert scrim_setup_problems(guild(mentionable=False, can_mention=True), None, 2) == []
+    assert scrim_setup_problems(guild(found=False), None, None) == []  # nothing configured

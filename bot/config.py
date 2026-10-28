@@ -33,6 +33,10 @@ class Settings:
     # Logging: console always; also a daily rotating file in `log_dir` (empty LOG_DIR = no file).
     log_level: str = "INFO"
     log_dir: Path | None = Path("logs")
+    # Scrim lobbies: opened/scheduled only in this channel, and announced by tagging this role
+    # (inside a spoiler). Unset (the default, e.g. a development server) = any channel, no tag.
+    scrim_channel_id: int | None = None
+    scrim_role_id: int | None = None
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -70,10 +74,23 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         champion_icons=_truthy(env.get("CHAMPION_ICONS", "true")),
         log_level=_parse_log_level(env.get("LOG_LEVEL", "")),
         log_dir=_parse_log_dir(env.get("LOG_DIR", "logs")),
+        scrim_channel_id=_parse_optional_id(env, "SCRIM_CHANNEL_ID"),
+        scrim_role_id=_parse_optional_id(env, "SCRIM_ROLE_ID"),
     )
 
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def _parse_optional_id(env: Mapping[str, str], name: str) -> int | None:
+    """A Discord ID from the environment; empty or unset means "not configured"."""
+    raw = env.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigError(f"{name} must be a numeric Discord ID (got {raw!r}).") from None
 
 
 def _parse_log_level(raw: str) -> str:
