@@ -33,8 +33,8 @@ Keep-Dreaming-Bot is the bot of the **Keep Dreaming** Discord server. It is made
 runs there every day. It is not a public bot (there is no invite link) and it is not meant to be a
 general-purpose matchmaking product: it is the server's own bot, and it does whatever the community has
 wanted so far. It runs 24/7 on [Railway](https://railway.com) as a single worker service, deployed
-straight from the `main` branch of this repository (every merge redeploys it), with its SQLite database on
-a persistent volume.
+straight from the `main` branch of this repository (a merge that changes the bot's code or dependencies
+redeploys it), with its SQLite database on a persistent volume.
 
 It started as a "name of the day" joke and has grown one feature at a time. It currently does two things,
 and gets more as the server asks for them:

@@ -53,6 +53,12 @@ Add or update tests for changed behaviour; business logic is tested without Disc
 - Slash commands only, with default intents (no privileged intents).
 - Everything the players read is in Portuguese; code, comments, docs and commit messages are in English.
 
+## Dependency updates
+
+Dependabot opens a pull request each month for the Python dependencies and the GitHub Actions versions.
+Once CI passes, GitHub Actions updates and Python patch or minor updates merge by themselves
+(`.github/workflows/dependabot-auto-merge.yml`); a major version bump stays open for a human to review.
+
 ## Style
 
 - Type hints and clear names; match the surrounding code (ruff and pyright enforce the rest).
