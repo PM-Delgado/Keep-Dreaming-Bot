@@ -82,6 +82,10 @@ database locally and copy it to the volume once. After that the volume is the so
 
 ## Updates and restarts
 
+On Railway, set **Watch Paths** on the service (for example `/bot/**`, `/assets/**`, `/requirements.txt` and
+`/.python-version`) so that only changes to the code and the dependencies redeploy it, and a documentation or
+CI change leaves the running bot alone.
+
 A restart is a short outage (the old process stops before the new one starts, so there are never two
 bots on one token). The bot closes cleanly on `SIGTERM`, and lobby buttons keep working afterwards because
 their state is in the database. If a process crashes repeatedly, read the log before restarting it in a
