@@ -116,14 +116,15 @@ def format_line(
     role_icon: str = "",
     champion_name: str | None = None,
 ) -> str:
-    """One game: result, champion, role, KDA, CS, duration, age, the account it was played on
-    (★ in front of the main one) and optionally extra stats.
+    """One game on one line: ★ if it was played on the main account, result, champion, role, KDA,
+    CS, duration, age (and optionally extra stats on a second line).
 
     The champion and the role are shown as icons when given, else as text (`champion_name` is the
     display name; the entry only has Riot's id).
     """
     result = RESULT_EMOJI[entry.result]
-    kda = f"{entry.kills}/{entry.deaths}/{entry.assists} ({entry.kda:.1f} KDA)"
+    # No "KDA" label: the summary line above already says `KDA:` and a row must stay short.
+    kda = f"{entry.kills}/{entry.deaths}/{entry.assists} ({entry.kda:.1f})"
     if champion_icon and role_icon:
         parts = [f"{result} {champion_icon} {role_icon}", kda]
     else:
@@ -135,7 +136,8 @@ def format_line(
         parts.append(f"{entry.cs} CS" + (f" ({per_min:.1f}/min)" if per_min is not None else ""))
     parts += [format_duration(entry.duration_s), format_ago(entry.played_at, now)]
     line = " · ".join(parts)
-    line += f" · {'★ ' if entry.is_main else ''}*{entry.riot_id}*"
+    if entry.is_main:
+        line = f"★ {line}"
     if details:
         extra = []
         if entry.damage is not None:

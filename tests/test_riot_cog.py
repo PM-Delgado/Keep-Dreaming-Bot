@@ -27,12 +27,14 @@ class FakeInteraction:
         )
         self.sent: list[dict] = []  # everything said, in order
         self._done = False
+        self.deferred = False
         self.namespace = SimpleNamespace()
         outer = self
 
         class Response:
             async def defer(self, ephemeral: bool = False, **_):
                 outer._done = True
+                outer.deferred = True
 
             async def send_message(self, content=None, **kwargs):
                 outer._done = True

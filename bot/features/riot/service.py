@@ -41,6 +41,7 @@ VIEW_MAX_AGE = timedelta(minutes=30)  # /profile view refreshes a player checked
 TEAMS_MAX_AGE = timedelta(minutes=60)  # a ready-check refreshes the ranks of its ten players
 HISTORY_MAX_AGE = timedelta(hours=6)  # ranked history is re-synced (in the background) after this
 VIEW_WAIT_S = 4.0  # a command waits this long for Riot, then shows what is saved
+HISTORY_VIEW_MAX_AGE = timedelta(minutes=5)  # /riot history asks Riot for new games after this
 SAME_RANK_STORED_EVERY = timedelta(days=1)  # an unchanged rank is saved again at most this often
 
 CONSENT_NOTICE = (
@@ -134,6 +135,7 @@ class RiotService:
         teams_max_age: timedelta = TEAMS_MAX_AGE,
         history_max_age: timedelta = HISTORY_MAX_AGE,
         view_wait_s: float = VIEW_WAIT_S,
+        history_view_max_age: timedelta = HISTORY_VIEW_MAX_AGE,
     ) -> None:
         self.repo = repo
         self.ratings = ratings
@@ -147,6 +149,7 @@ class RiotService:
         self.teams_max_age = teams_max_age
         self.history_max_age = history_max_age
         self.view_wait_s = view_wait_s
+        self.history_view_max_age = history_view_max_age
         self._last_refresh: dict[int, datetime] = {}  # manual /riot refresh (its cooldown)
         self._last_checked: dict[int, datetime] = {}  # any successful rank check, automatic or not
         self._inflight: dict[int, asyncio.Task[None]] = {}  # automatic refresh running per player
@@ -432,6 +435,63 @@ class RiotService:
                 self.view_wait_s,
             )
 
+    async def _history_accounts(self, discord_id: int, riot_id: str | None) -> list[AccountRow]:
+        """The accounts a `/riot history` would show (none if the player or account is unknown)."""
+        try:
+            player = await self.players.require(discord_id)
+        except PlayerError:
+            return []
+        accounts = await self.repo.list_accounts(player.id)
+        if riot_id is None:
+            return accounts
+        wanted = riot_id.strip().casefold()
+        return [a for a in accounts if a.riot_id.casefold() == wanted]
+
+    def _history_stale(self, accounts: list[AccountRow]) -> list[AccountRow]:
+        """Accounts worth asking Riot about now. One whose first sync never finished is left to
+        the background syncs: waiting for a hundred games would only make the command slow."""
+        now = self.clock()
+        return [
+            a
+            for a in accounts
+            if a.history_synced_at is not None
+            and now - a.history_synced_at >= self.history_view_max_age
+        ]
+
+    async def history_refresh_due(self, discord_id: int, riot_id: str | None = None) -> bool:
+        """Whether `/riot history` should first ask Riot for new games (cheap: no network)."""
+        if self.client is None:
+            return False
+        return bool(self._history_stale(await self._history_accounts(discord_id, riot_id)))
+
+    async def refresh_history_for_view(self, discord_id: int, riot_id: str | None = None) -> None:
+        """Fetch the new ranked games of the accounts `/riot history` will show, waiting up to
+        `view_wait_s`; whatever is still running carries on in the background. Never raises."""
+        stale = self._history_stale(await self._history_accounts(discord_id, riot_id))
+        if not stale:
+            return
+        syncs = asyncio.gather(*(self._spawn(self._sync_for_view(a)) for a in stale))
+        try:
+            await asyncio.wait_for(asyncio.shield(syncs), self.view_wait_s)
+        except TimeoutError:
+            log.info(
+                "Riot history of player %s still syncing after %.0f s: showing the saved games.",
+                discord_id,
+                self.view_wait_s,
+            )
+
+    async def _sync_for_view(self, account: AccountRow) -> None:
+        try:
+            stored = await self.sync_history(account, background=False)
+        except PlayerError as exc:
+            log.warning("Riot history (history view) of account %s failed: %s", account.id, exc)
+        except Exception:
+            log.exception("Riot history (history view) of account %s crashed", account.id)
+        else:
+            log.info(
+                "Riot history (history view) of account %s: %d new game(s)", account.id, stored
+            )
+
     def spawn_rank_refresh(self, player_ids: Iterable[int]) -> None:
         """A ready-check began: refresh the ranks of its players in the background, so the
         proposal is built from current ranks. Does not wait and never raises."""
@@ -554,9 +614,10 @@ class RiotService:
 
     # --- ranked history -> role experience ---------------------------------------------------
 
-    async def sync_history(self, account: AccountRow) -> int:
+    async def sync_history(self, account: AccountRow, background: bool = True) -> int:
         """Fetch ranked Solo/Duo games not stored yet. Resumable: whatever was stored before an
-        error stays, and the next run continues. Returns the number of new games."""
+        error stays, and the next run continues. Returns the number of new games.
+        `background=False` is for a player waiting for the answer."""
         client = self._client()
         if account.id in self._syncing:
             return 0
@@ -566,7 +627,11 @@ class RiotService:
             start = int((now - timedelta(days=self.history.window_days)).timestamp())
             try:
                 ids = await client.ranked_match_ids(
-                    account.puuid, account.platform, start, self.history.max_games_per_account
+                    account.puuid,
+                    account.platform,
+                    start,
+                    self.history.max_games_per_account,
+                    background=background,
                 )
                 known = await self.repo.known_match_ids(account.id)
                 stored = 0
@@ -574,7 +639,9 @@ class RiotService:
                     if match_id in known:
                         continue
                     try:
-                        game = await client.ranked_game(match_id, account.puuid, account.platform)
+                        game = await client.ranked_game(
+                            match_id, account.puuid, account.platform, background=background
+                        )
                     except RiotNotFound:
                         continue  # the match was removed
                     if game is not None:

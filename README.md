@@ -133,7 +133,7 @@ Without the key every `/riot` command answers that the integration is disabled.
 | `/riot unlink <riot_id> [player]` | private | Remove an account and all data tied to it. |
 | `/riot list [player]` | public | Large heading `Contas Riot · Name` with the avatar and the tier-coloured side bar; one line per account (★ = main, games stored, last sync); no footer. |
 | `/riot refresh [player]` | private | Refresh names, rank and ranked history right now (10 minute cooldown for players; admins skip it). Rarely needed: profile views, ready-checks and a 6-hourly timer already refresh automatically (see `docs/riot-policy.md`). |
-| `/riot history [player] [riot_id]` | public | Heading `Solo/Duo · Name` with the avatar and tier colour, `Jogos: 6V 4D (60%) · KDA: 3.25`, then the last ten ranked Solo/Duo games (result, champion and role icons, KDA, CS, duration, and the account it was played on, with a ★ in front of the main one); a small line says when it was last updated. |
+| `/riot history [player] [riot_id]` | public | Heading `Solo/Duo · Name` with the avatar and tier colour, `Jogos: 6V 4D (60%) · KDA: 3.25`, then the last ten ranked Solo/Duo games (one line each: result, champion and role icons, KDA, CS, duration; a ★ in front of the games played on the main account, no account names); a small line says when it was last updated. If an account's history is older than 5 minutes the bot first asks Riot for new games (up to 4 seconds; the answer then arrives as a reply to "thinking..."); a Riot failure never blocks it. |
 
 ### Admin
 

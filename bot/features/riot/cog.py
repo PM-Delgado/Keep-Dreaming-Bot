@@ -376,10 +376,23 @@ class Riot(commands.Cog):
             log_refusal(interaction, exc)
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
+        send = interaction.response.send_message
+        if await self.service.history_refresh_due(target.id, riot_id):
+            # Ask Riot for new games first. Discord wants an answer within 3 s, so acknowledge now
+            # (the wait is a few seconds at most), then read the games again.
+            await interaction.response.defer()
+            await self.service.refresh_history_for_view(target.id, riot_id)
+            send = interaction.followup.send
+            try:
+                view = await self.service.recent_history(target.id, riot_id=riot_id)
+            except (PlayerError, RatingError) as exc:
+                log_refusal(interaction, exc)
+                await send(str(exc))
+                return
         ids = sorted({g.champion for g in view.games if g.champion})
         names = await self.champions.names(ids) if self.champions else {}
         icons = await self.champions.icon_markup(ids) if self.champions else {}
-        await interaction.response.send_message(
+        await send(
             embed=build_history_embed(
                 view,
                 datetime.now(UTC),
