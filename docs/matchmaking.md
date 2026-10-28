@@ -1,6 +1,6 @@
 # How ratings, ranks and matchmaking work
 
-This is the internal reference for the in-house system: where a player's strength comes from, how a
+This is the reference for the in-house system: where a player's strength comes from, how a
 game changes it, what the visible rank means, and how teams are built. Numbers are the code
 defaults at the time of writing; the file that owns each one is named so you can check it.
 
@@ -8,7 +8,7 @@ Contents: [the three numbers](#the-three-numbers-r-h-e) · [where R comes from](
 [how a game changes H](#how-a-game-changes-h) · [the visible rank](#the-visible-rank) ·
 [roles](#roles-and-proficiency) · [building teams](#building-teams) ·
 [the life of a game](#the-life-of-a-game) · [what is stored](#what-is-stored-and-what-is-derived) ·
-[parameter reference](#parameter-reference)
+[parameter reference](#parameter-reference) · [why these defaults](#why-these-defaults)
 
 ## The three numbers: R, H, E
 
@@ -220,3 +220,75 @@ version, and the caches are replayed at startup.
 | `ready_check_seconds`, `idle_hours` | 120, 3 | `LobbyParams` | ready-check length; an idle unfinished lobby is cancelled |
 | `reminder_minutes` (scheduled lobby) | 30 | `LobbyParams` | reminder before a scheduled start |
 | `auto_confirm_minutes`, `reminder_minutes`, `expire_hours` | 30, 90, 12 | `MatchParams` | quiet result is confirmed; unreported game is nudged, then voided |
+
+## Why these defaults
+
+The defaults come from the tuning lab (see [simulations.md](simulations.md#the-tuning-lab)): many
+full seasons of a made-up group of about twenty players, played through the real lobby, match and
+rating code, with settings compared on the same seeds. The simulated world is an assumption, not a
+measurement. Unless noted, the numbers below are 60 games and 6 seeds.
+
+### Findings
+
+1. **Perfect ratings make the balancer nearly perfect.** With `oracle=1`, 0% of games are lopsided
+   and the mean edge is 0.012. Everything left is a question of *knowing* how good people are.
+2. **The first defaults made ratings worse than the rank alone.** Estimate error went from 1.82
+   (rank only) to 2.3 after 10-60 games, only 42% of players ended within one tier of the right one,
+   and a player changed visible tier 13 times in 60 games. Cause: a rank-seeded rating started with
+   `sigma_rank_seed = 6.5`, so each of the first games moved ratings by several points, and a
+   balanced game carries very little information (it is close to a coin flip).
+3. **`sigma_rank_seed` is the big lever.** Trusting the rank more (2-3 instead of 6.5) turns the
+   curve around: error falls from 1.82 to about 1.5 after 40-60 games, 65-72% of players end within
+   one tier, and tier changes drop from 13 to 1-3 per player. `beta` (8-12) and `d_down` (2) help a
+   little and mostly reduce flapping; `d_up` matters little.
+4. **A joint search (73 settings x 2 worlds) finds a flat top.** The best dozen settings are within
+   noise of each other, all with `sigma_rank_seed` 2-3, so the simplest was picked.
+5. **In a harsher world** (rank deviation sd 2.0, 30% outliers) no setting beats the first defaults
+   on estimate error by much (2.3 vs 2.3-2.5 after 60 games), but the new ones still end with 1-3
+   tier changes per player instead of 13. If real ranks say little about real skill, a larger
+   `sigma_rank_seed` (about 3) is the safer middle. Revisit after about 100 real games.
+6. **The remaining error is mostly a data limit.** Even tuned, 30-38% of games are clearly lopsided
+   on the hidden skills after 60 games. A balanced game is nearly a coin flip, so it teaches the
+   system little; the first ~20 games (about 7 per player) change almost nothing. More *signals* are
+   the way forward, not more parameter tweaking.
+
+### Settings applied
+
+| Setting | Was | Now | Why |
+|---|---|---|---|
+| `sigma_rank_seed` | 6.5 | 2.0 | trust the Riot rank until results say otherwise |
+| `d_down` | 3.0 | 2.0 | a slump should not drag the matchmaking estimate far below the rank |
+| `beta`, `d_up`, `tau`, ladder | unchanged | unchanged | no clear gain in the search |
+
+Changing these does not rewrite history: `sigma_rank_seed` only affects *new* seeds and `d_down` is
+applied when the estimate is computed. Players already seeded keep their stored sigma.
+
+### Experiment: form from the last five games (no gain, left off)
+
+The signal: the average of (won - the win chance the bot predicted) over a player's last `form_games`
+confirmed games, times `form_weight` rating points (capped at `form_cap`), added to the matchmaking
+estimate E only, never to H or the visible tier. The simulated world has hidden form that the bot
+cannot see, so the signal has something real to find. Each cell is the share of clearly lopsided
+games counting the day's form / the prediction error (10 seeds, 60 games, current defaults):
+
+| Hidden form | Weight 0 (off) | Weight 2 | Weight 4 | Weight 8 |
+|---|---|---|---|---|
+| sd 1, fades fast (a normal day-to-day swing) | 40% / .140 | 43% / .143 | 45% / .149 | 47% / .158 |
+| sd 3, fades fast | 64% / .222 | 66% / .232 | 64% / .221 | 67% / .235 |
+| sd 2.5, streaky (carries 80%) | 57% / .193 | | 61% / .202 | 60% / .199 |
+| sd 3, very streaky (carries 95%) | 64% / .216 | | 63% / .214 | 65% / .220 |
+
+A window of 3 or 10 games gave the same picture. The signal is never clearly better than nothing and
+is usually a little worse: one balanced game is nearly a coin flip, so five of them say very little
+about someone's form, and the adjustment mostly adds noise. It stays at `form_weight = 0`. The code
+is small and tested, so a better signal can reuse it.
+
+### Ideas to test next
+
+* A stronger per-game performance signal than win/loss, now that kills/deaths/assists are recorded
+  and validated per game: a game's KDA says more about a player's day than a coin-flip result.
+* Riot ranked history (recent win rate, games played, LP trend) as an extra prior; stale or inactive
+  ranks widen the uncertainty.
+* Adaptive uncertainty: raise a player's sigma when they keep beating or losing to the prediction.
+* Visible-tier thresholds and hysteresis (`demotion_buffer`, tier floors) once ratings are stable.
+* Balancer weights (`w_role`, `w_lane`, ...) in the harsher world, where fit matters more.

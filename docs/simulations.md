@@ -100,7 +100,7 @@ whether a conclusion survives.
 
 ### Current headline results
 
-See [tuning.md](tuning.md) for the method and every finding. In short, on the default world after
+See [Why these defaults](matchmaking.md#why-these-defaults) for every finding. In short, on the default world after
 60 games:
 
 | Setting | E-rmse (start -> end) | within one tier | tier changes per player | clearly lopsided games |

@@ -1,6 +1,6 @@
 """Public numbers: history, personal statistics and the leaderboards. Read-only, no Discord.
 
-Rules (agreed with the owner, see docs/status.md):
+Rules:
 * only *confirmed* games count; win/loss counts as soon as the result is confirmed;
 * champion and KDA numbers use *validated* stats only (pending ones are never counted);
 * the role of a game is the one actually played (`played_role`), else the assigned one;
