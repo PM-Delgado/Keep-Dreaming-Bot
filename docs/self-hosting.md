@@ -37,7 +37,7 @@ that install from `requirements.txt` therefore work without further setup.
 ## Settings
 
 Everything is read once from environment variables or `.env` (`bot/config.py`); the full list with
-defaults is in the [README](../README.md#configuration) and in `.env.example`. On a hosting platform set
+defaults is in the [README](../README.md#-configuration) and in `.env.example`. On a hosting platform set
 them as service variables instead of shipping a `.env`, and keep `DISCORD_TOKEN` and `RIOT_API_KEY`
 secret. For a production deployment:
 
