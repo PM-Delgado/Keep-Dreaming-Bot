@@ -22,7 +22,8 @@ TITLE = "🏆 Classificação Solo/Duo"
 UNRANKED = "Sem rank"
 NO_PLAYERS = "Ainda não há jogadores com conta Riot ligada."
 FOOTER_PAGE = re.compile(r"^Página (\d+)/(\d+)")
-MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}  # after the third: `4.`, `5.`, ...
+MAIN_STAR = "★"
 # Generic dots in the colour of each tier (not Riot's emblems, which the policy leaves out).
 TIER_DOTS = {
     "IRON": "⚫",
@@ -104,12 +105,12 @@ def row_text(row: Row, tier_icons: Mapping[str, str] | None = None) -> str:
     text, so no row can wrap into a third line.
 
         🥇 **Brunão** · 🟣 MASTER · 689 LP
-        -# thisisvaldo#EUW · 📈 +27
+        -# ★ thisisvaldo#EUW · 📈 +27
 
     The tier icon is the uploaded emblem when there is one, else a generic colour dot.
     """
     main = row.main
-    place = MEDALS.get(row.position, f"**{row.position}**")
+    place = MEDALS.get(row.position, f"**{row.position}.**")
     name = discord.utils.escape_markdown(main.nickname)
     if main.points is None or main.tier is None or main.lp is None:
         first = f"{place} **{name}** · {UNRANKED}"
@@ -118,11 +119,9 @@ def row_text(row: Row, tier_icons: Mapping[str, str] | None = None) -> str:
         dot = (tier_icons or {}).get(tier) or TIER_DOTS.get(tier, "")
         rank = rank_label(main.tier, main.division, main.lp)
         first = f"{place} **{name}** · {f'{dot} ' if dot else ''}{rank}"
-    second = " · ".join(
-        part
-        for part in (discord.utils.escape_markdown(main.riot_id), trend_text(row.trend))
-        if part
-    )
+    # The leaderboard lists main accounts only, so the star (as in /riot history) is always there.
+    riot_id = f"{MAIN_STAR} {discord.utils.escape_markdown(main.riot_id)}"
+    second = " · ".join(part for part in (riot_id, trend_text(row.trend)) if part)
     return f"{first}\n-# {second}"
 
 

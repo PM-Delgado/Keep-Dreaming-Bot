@@ -175,13 +175,13 @@ def test_embed_text_has_the_agreed_layout_and_no_riot_disclaimer():
             "🔥 Maior subida: **Exduardo** +27 · 🧊 Maior queda: **Rex** -42",
             "",
             "🥇 **Exduardo** · 🟣 MASTER · 1034 LP",
-            "-# Exduardo#EUW · 📈 +27",
+            "-# ★ Exduardo#EUW · 📈 +27",
             "🥈 **Rex** · 🔷 DIAMOND III · 58 LP",
-            "-# Rex#EUW · 📉 -42",
+            "-# ★ Rex#EUW · 📉 -42",
             "🥉 **Pino** · 🟡 GOLD I · 50 LP",
-            "-# Pino#EUW",
-            "**4** **Zed** · Sem rank",
-            "-# Zed#EUW",
+            "-# ★ Pino#EUW",
+            "**4.** **Zed** · Sem rank",
+            "-# ★ Zed#EUW",
         ]
     )
     assert foot(embed) == "Página 1/1 · Atualizado hoje às 13:00 · 📈📉 = LP desde ontem"
@@ -377,7 +377,7 @@ async def test_leaderboard_command_asks_riot_first_when_ranks_are_missing(stack)
     assert ix.deferred  # Riot was asked, so the reply is a follow-up
     reply = ix.sent[0]
     assert "ephemeral" not in reply  # public
-    assert reply["embed"].description.startswith("🥇 **Rui** · 🟣 MASTER · 120 LP\n-# Beta#EUW")
+    assert reply["embed"].description.startswith("🥇 **Rui** · 🟣 MASTER · 120 LP\n-# ★ Beta#EUW")
     assert "view" not in reply  # three players: one page, no buttons
 
 
@@ -388,7 +388,7 @@ async def test_leaderboard_command_shows_the_saved_ranks_without_asking_riot(sta
     ix = FakeInteraction(5)
     await cog.leaderboard.callback(cog, ix, False)  # type: ignore[arg-type]
     assert not ix.deferred and len(world.calls) == calls
-    assert "**Ana** · 🟡 GOLD II · 40 LP\n-# Alpha#EUW" in ix.sent[0]["embed"].description
+    assert "**Ana** · 🟡 GOLD II · 40 LP\n-# ★ Alpha#EUW" in ix.sent[0]["embed"].description
 
 
 async def test_many_players_get_the_page_buttons(stack):
@@ -459,7 +459,7 @@ async def test_an_admin_post_refreshes_and_posts_without_a_snapshot(stack):
     await cog.leaderboard.callback(cog, ix, True)  # type: ignore[arg-type]
     assert "publicado" in ix.sent[0]["content"] and ix.sent[0]["ephemeral"] is True
     posted = channel.sent[0]["embed"]
-    assert "**Rui**" in posted.description and "-# Beta#EUW" in posted.description
+    assert "**Rui**" in posted.description and "-# ★ Beta#EUW" in posted.description
     assert (await stack.rows("SELECT COUNT(*) FROM riot_rank_snapshots"))[0][0] == 0
 
 
