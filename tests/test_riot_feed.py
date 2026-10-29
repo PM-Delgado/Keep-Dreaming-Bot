@@ -411,9 +411,11 @@ async def test_two_cycles_never_run_at_the_same_time(stack, world, clock):
 def test_the_history_line_shows_the_lp_change_only_when_it_is_known():
     now = NOW + timedelta(days=3)
     won = format_line(to_entry(stored(lp_delta=27)), now)
-    assert " · 31 min · +27 LP · há " in won
+    first, second = won.split("\n")
+    assert "LP" not in first  # the first row never grows with the LP
+    assert second.startswith("-# 31 min · +27 LP · há ")
     lost = format_line(to_entry(stored(win=False, lp_delta=-19)), now)
-    assert " · -19 LP · " in lost
+    assert lost.split("\n")[1].startswith("-# 31 min · -19 LP · há ")
     for unknown in (None, 0):
         assert "LP" not in format_line(to_entry(stored(lp_delta=unknown)), now)
     remake = format_line(to_entry(stored(early_surrender=True, lp_delta=12)), now)
