@@ -68,9 +68,9 @@ under the personal-key limits (18 requests per second, 90 per 2 minutes), honour
 HTTP 429, and reserves part of each window for interactive commands so background syncs never starve
 them.
 
-## Champion and role icons
+## Champion, role and rank icons
 
 Champion icons come from Riot's Data Dragon (`ddragon.leagueoflegends.com`); the five role icons in
 `bot/features/icons/roles/` were rendered from the game client's position SVGs as published by
 [Community Dragon](https://www.communitydragon.org). Each is uploaded once as a Discord application
-emoji. Set `CHAMPION_ICONS=false` to stop uploading and showing them; names are used instead.
+emoji. The ten rank icons in `bot/features/icons/tiers/` are the ranked emblems published by Community Dragon, cropped and resized to 128 px, uploaded the same way (`tier_emojis`) and shown in the Solo/Duo leaderboard; without an uploaded icon a colour dot is shown. Set `CHAMPION_ICONS=false` to stop uploading and showing all of them; names are used instead.

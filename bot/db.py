@@ -333,6 +333,14 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (riot_account_id, day)
     );
     """,
+    # 13: the ranked-emblem icons (bundled PNGs, uploaded once as application emojis), like 11.
+    """
+    CREATE TABLE tier_emojis (
+        tier       TEXT PRIMARY KEY,  -- upper-case, as Riot sends it: GOLD, MASTER, ...
+        emoji_id   INTEGER NOT NULL,
+        emoji_name TEXT NOT NULL
+    );
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

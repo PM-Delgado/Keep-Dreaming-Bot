@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
+from bot.features.icons.tiers import TierIconService
 from bot.features.players.service import PlayerError
 from bot.features.players.text import tier_color
 from bot.features.ratings.service import RatingError
@@ -189,18 +190,20 @@ class Riot(commands.Cog):
         service: RiotService,
         icons: RoleIconService | None = None,
         champions: ChampionService | None = None,
+        tiers: TierIconService | None = None,
     ) -> None:
         self.bot = bot
         self.service = service
         self.icons = icons  # role icons
         self.champions = champions  # champion names and icons
+        self.tiers = tiers  # rank (tier) icons
 
     riot = app_commands.Group(name="riot", description="Contas Riot ligadas aos jogadores.")
 
     async def cog_load(self) -> None:
         self.refresher.start()
         # One registered view answers every leaderboard message, even those posted before a restart.
-        self.bot.add_view(LeaderboardView(self.service))
+        self.bot.add_view(LeaderboardView(self.service, self.tiers))
         if self.bot.settings.riot_feed_channel_id is not None and self.service.enabled:
             self.daily_leaderboard.start()
 
@@ -247,7 +250,7 @@ class Riot(commands.Cog):
         if snapshot:
             await self.service.save_daily_snapshot()
         try:
-            await channel.send(**await leaderboard_message(self.service))
+            await channel.send(**await leaderboard_message(self.service, self.tiers))
         except discord.HTTPException as exc:
             log.warning("Could not post the leaderboard: %s", exc.status)
             return False
@@ -460,7 +463,7 @@ class Riot(commands.Cog):
             await interaction.response.defer()
             await self.service.refresh_ranks_for_view()
             send = interaction.followup.send
-        await send(**await leaderboard_message(self.service))
+        await send(**await leaderboard_message(self.service, self.tiers))
 
     async def _post_leaderboard_command(self, interaction: discord.Interaction) -> None:
         if not is_admin(self.bot.settings, interaction.user.id):
@@ -532,6 +535,7 @@ async def setup(bot: "KDBot") -> None:
             service,
             getattr(bot.get_cog("Icons"), "roles", None),
             getattr(bot.get_cog("Champions"), "service", None),
+            getattr(bot.get_cog("Icons"), "tiers", None),
         )
     )
     resumed = await service.resume_unfinished_syncs()

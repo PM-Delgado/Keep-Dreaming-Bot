@@ -17,9 +17,11 @@ from bot.features.riot.leaderboard import (
     MainRank,
     build_embed,
     build_rows,
+    highlights,
     next_page,
     page_count,
     page_of_footer,
+    row_text,
     trend_text,
     updated_text,
 )
@@ -115,7 +117,7 @@ def test_trend_is_measured_against_the_previous_snapshot():
     )
     by_name = {r.main.nickname: r.trend for r in rows}
     assert by_name == {"Up": 45, "Down": -20, "New": None}
-    assert [trend_text(t) for t in (45, -20, 0, None)] == ["▲ +45", "▼ -20", "—", "—"]
+    assert [trend_text(t) for t in (45, -20, 0, None)] == ["📈 +45", "📉 -20", "", ""]
 
 
 def test_an_unknown_tier_is_listed_as_unranked_instead_of_failing():
@@ -129,29 +131,102 @@ def test_pages_hold_ten_rows_and_wrap_around():
     assert page_count(rows) == 2 and page_count([]) == 1
     first = build_embed(rows, 1, NOW, NOW)
     second = build_embed(rows, 2, NOW, NOW)
-    assert desc(first).count("\n") == PAGE_SIZE - 1
+    assert len(desc(first).split("\n")) == PAGE_SIZE * 2  # two lines per player
     assert "P01" in desc(first) and "P11" in desc(second)
-    assert desc(second).count("\n") == 7  # 8 rows
+    assert len(desc(second).split("\n")) == 8 * 2
     assert next_page(2, 2, 1) == 1 and next_page(1, 2, -1) == 2 and next_page(1, 3, 1) == 2
     assert page_of_footer(foot(second)) == 2
     assert page_of_footer(None) == 1 and page_of_footer("something else") == 1
     assert foot(build_embed(rows, 99, NOW, NOW)).startswith("Página 2/2")  # clamped
 
 
+def test_each_player_takes_exactly_two_lines_whatever_the_trend_or_name():
+    names = ["Al", "N" * 24, "Brunão"]
+    mains = [
+        MainRank(i, name, f"{'R' * 16}#{'T' * 5}", "GRANDMASTER", None, 1804 - i)
+        for i, name in enumerate(names)
+    ]
+    for previous in ({}, {0: 1, 1: 5000, 2: 2800 + 1802}):
+        for row in build_rows(mains, previous):
+            lines = row_text(row).split("\n")
+            assert len(lines) == 2
+            assert lines[1].startswith("-# ")  # small text, so the Riot ID and trend cannot wrap
+            assert "📈" not in lines[0] and "📉" not in lines[0]  # line one never grows
+
+
 def test_embed_text_has_the_agreed_layout_and_no_riot_disclaimer():
-    rows = build_rows([main(1, "Exduardo", "MASTER", None, 1034)], {1: 2800 + 1007})
+    rows = build_rows(
+        [
+            main(1, "Exduardo", "MASTER", None, 1034),
+            main(2, "Rex", "DIAMOND", "III", 58),
+            main(3, "Pino", "GOLD", "I", 50),
+            main(4, "Zed", None, None, None),
+        ],
+        {
+            1: 2800 + 1007,
+            2: ladder_points("DIAMOND", "III", 100),
+            3: ladder_points("GOLD", "I", 50),
+        },
+    )
     embed = build_embed(rows, 1, NOW, NOW)
     assert embed.title == "🏆 Classificação Solo/Duo"
-    assert embed.description == "**1** · Exduardo (Exduardo#EUW) · MASTER · 1034 LP · ▲ +27"
-    assert embed.footer.text == "Página 1/1 · Atualizado hoje às 13:00 · ▲▼ = LP desde ontem"
-    assert "Riot" not in embed.footer.text
+    assert desc(embed) == "\n".join(
+        [
+            "🔥 Maior subida: **Exduardo** +27 · 🧊 Maior queda: **Rex** -42",
+            "",
+            "🥇 **Exduardo** · 🟣 MASTER · 1034 LP",
+            "-# Exduardo#EUW · 📈 +27",
+            "🥈 **Rex** · 🔷 DIAMOND III · 58 LP",
+            "-# Rex#EUW · 📉 -42",
+            "🥉 **Pino** · 🟡 GOLD I · 50 LP",
+            "-# Pino#EUW",
+            "**4** **Zed** · Sem rank",
+            "-# Zed#EUW",
+        ]
+    )
+    assert foot(embed) == "Página 1/1 · Atualizado hoje às 13:00 · 📈📉 = LP desde ontem"
+    assert "Riot" not in foot(embed)
+    assert embed.color == discord.Color(0x9D5CC9)  # the leader's tier colour (Master)
+
+
+def test_a_quiet_day_has_no_highlights_trend_marks_or_legend():
+    rows = build_rows([main(1, "A", "GOLD", "II", 40), main(2, "B", "GOLD", "II", 30)], {})
+    embed = build_embed(rows, 1, NOW, NOW)
+    assert "🔥" not in desc(embed) and "📈" not in desc(embed) and "📉" not in desc(embed)
+    assert foot(embed) == "Página 1/1 · Atualizado hoje às 13:00"
+    assert not highlights(rows)
+    flat = build_rows([main(1, "A", "GOLD", "II", 40)], {1: ladder_points("GOLD", "II", 40)})
+    assert not highlights(flat)  # nobody moved
+
+
+def test_highlights_only_name_a_climb_when_someone_climbed():
+    rows = build_rows(
+        [main(1, "Down", "GOLD", "II", 10), main(2, "Flat", "GOLD", "II", 50)],
+        {1: ladder_points("GOLD", "II", 30), 2: ladder_points("GOLD", "II", 50)},
+    )
+    assert highlights(rows) == "🧊 Maior queda: **Down** -20"
+
+
+def test_the_highlights_line_is_only_on_the_first_page():
+    mains = [main(i, f"P{i:02d}", "GOLD", "II", 100 - i) for i in range(1, 15)]
+    rows = build_rows(mains, {1: ladder_points("GOLD", "II", 10)})
+    assert desc(build_embed(rows, 1, NOW, NOW)).startswith("🔥")
+    assert "🔥" not in desc(build_embed(rows, 2, NOW, NOW))
+
+
+def test_unknown_tiers_have_no_dot_and_the_sidebar_falls_back_to_gold():
+    rows = build_rows([main(1, "Odd", "WOOD", "I", 5)], {})
+    assert "· Sem rank" in desc(build_embed(rows, 1, NOW, NOW))
+    assert build_embed(rows, 1, NOW, NOW).color == discord.Color.gold()
 
 
 def test_names_cannot_inject_markdown_and_unranked_say_so():
     rows = build_rows([main(1, "*bold*", None, None, None)], {})
     description = desc(build_embed(rows, 1, NOW, NOW))
-    assert description.endswith("· Sem rank")
-    assert "\\*bold\\*" in description
+    first, second = description.split("\n")
+    assert first.endswith("· Sem rank")
+    assert "\\*bold\\*" in first and "\\*bold\\*" in second  # nickname and Riot ID both escaped
+    assert "**bold**" not in description
 
 
 def test_updated_text_names_the_day_when_it_is_not_today():
@@ -302,7 +377,7 @@ async def test_leaderboard_command_asks_riot_first_when_ranks_are_missing(stack)
     assert ix.deferred  # Riot was asked, so the reply is a follow-up
     reply = ix.sent[0]
     assert "ephemeral" not in reply  # public
-    assert reply["embed"].description.startswith("**1** · Rui (Beta#EUW) · MASTER · 120 LP")
+    assert reply["embed"].description.startswith("🥇 **Rui** · 🟣 MASTER · 120 LP\n-# Beta#EUW")
     assert "view" not in reply  # three players: one page, no buttons
 
 
@@ -313,7 +388,7 @@ async def test_leaderboard_command_shows_the_saved_ranks_without_asking_riot(sta
     ix = FakeInteraction(5)
     await cog.leaderboard.callback(cog, ix, False)  # type: ignore[arg-type]
     assert not ix.deferred and len(world.calls) == calls
-    assert "Ana (Alpha#EUW) · GOLD II · 40 LP" in ix.sent[0]["embed"].description
+    assert "**Ana** · 🟡 GOLD II · 40 LP\n-# Alpha#EUW" in ix.sent[0]["embed"].description
 
 
 async def test_many_players_get_the_page_buttons(stack):
@@ -384,7 +459,7 @@ async def test_an_admin_post_refreshes_and_posts_without_a_snapshot(stack):
     await cog.leaderboard.callback(cog, ix, True)  # type: ignore[arg-type]
     assert "publicado" in ix.sent[0]["content"] and ix.sent[0]["ephemeral"] is True
     posted = channel.sent[0]["embed"]
-    assert "Rui (Beta#EUW)" in posted.description
+    assert "**Rui**" in posted.description and "-# Beta#EUW" in posted.description
     assert (await stack.rows("SELECT COUNT(*) FROM riot_rank_snapshots"))[0][0] == 0
 
 

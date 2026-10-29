@@ -8,6 +8,7 @@ from typing import Any
 
 import discord
 
+from bot.features.icons.tiers import TierIconService
 from bot.features.riot.leaderboard import (
     build_embed,
     next_page,
@@ -19,30 +20,37 @@ from bot.features.riot.service import RiotService
 NO_MENTIONS = discord.AllowedMentions.none()
 
 
-async def leaderboard_message(service: RiotService, page: int = 1) -> dict[str, Any]:
+def _icons(tiers: TierIconService | None) -> dict[str, str]:
+    return tiers.markup() if tiers else {}
+
+
+async def leaderboard_message(
+    service: RiotService, tiers: TierIconService | None = None, page: int = 1
+) -> dict[str, Any]:
     """Keyword arguments for `send`: the embed for one page of the saved ranks, and the buttons
     (only when there is more than one page)."""
     rows, updated = await service.leaderboard()
     message: dict[str, Any] = {
-        "embed": build_embed(rows, page, updated, datetime.now(UTC)),
+        "embed": build_embed(rows, page, updated, datetime.now(UTC), _icons(tiers)),
         "allowed_mentions": NO_MENTIONS,
     }
     if page_count(rows) > 1:
-        message["view"] = LeaderboardView(service)
+        message["view"] = LeaderboardView(service, tiers)
     return message
 
 
 class LeaderboardView(discord.ui.View):
-    def __init__(self, service: RiotService) -> None:
+    def __init__(self, service: RiotService, tiers: TierIconService | None = None) -> None:
         super().__init__(timeout=None)
         self.service = service
+        self.tiers = tiers
 
     async def _flip(self, interaction: discord.Interaction, step: int) -> None:
         message = interaction.message
         footer = message.embeds[0].footer.text if message and message.embeds else None
         rows, updated = await self.service.leaderboard()
         page = next_page(page_of_footer(footer), page_count(rows), step)
-        embed = build_embed(rows, page, updated, datetime.now(UTC))
+        embed = build_embed(rows, page, updated, datetime.now(UTC), _icons(self.tiers))
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, custom_id="riotlb:prev")

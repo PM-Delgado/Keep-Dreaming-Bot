@@ -17,6 +17,7 @@ from bot.features.icons.roles import (
     role_label,
     role_prefix,
 )
+from bot.features.icons.tiers import TierEmojiRepository, TierIconService
 from bot.features.icons.upload import IconUploadError
 from bot.features.players.proficiency import ROLES
 
@@ -39,6 +40,10 @@ class Uploads:
 
 def service(db, **kwargs) -> RoleIconService:
     return RoleIconService(RoleEmojiRepository(db), **kwargs)
+
+
+def tier_service(db, **kwargs) -> TierIconService:
+    return TierIconService(TierEmojiRepository(db), **kwargs)
 
 
 def live(uploads: Uploads) -> dict[str, int]:
@@ -178,20 +183,27 @@ class FakeEmojiBot:
 async def test_the_cog_uploads_missing_icons_and_adopts_existing_ones(db):
     icons = service(db)
     bot = FakeEmojiBot(existing=[("role_adc", 31)])
-    await Icons(bot, icons).sync()  # type: ignore[arg-type]
-    assert sorted(bot.created) == sorted(emoji_name(r) for r in ROLES if r != "ADC")
+    tiers = tier_service(db)
+    await Icons(bot, icons, tiers).sync()  # type: ignore[arg-type]
+    created = sorted(bot.created)
+    assert [n for n in created if n.startswith("role_")] == sorted(
+        emoji_name(r) for r in ROLES if r != "ADC"
+    )
+    assert len([n for n in created if n.startswith("tier_")]) == 10  # rank icons too
     assert icons.markup()["ADC"] == "<:role_adc:31>"
+    assert tiers.markup()["MASTER"].startswith("<:tier_master:")
 
 
 async def test_the_cog_survives_discord_errors_and_retries_next_time(db):
     icons = service(db)
     response: Any = SimpleNamespace(status=400, reason="Bad Request")
     bot = FakeEmojiBot(fail_with=discord.HTTPException(response, "no room"))
-    await Icons(bot, icons).sync()  # type: ignore[arg-type]
-    assert icons.markup() == {}
+    tiers = tier_service(db)
+    await Icons(bot, icons, tiers).sync()  # type: ignore[arg-type]
+    assert icons.markup() == {} and tiers.markup() == {}
     bot.fail_with = None
-    await Icons(bot, icons).sync()  # type: ignore[arg-type]
-    assert len(bot.created) == 5
+    await Icons(bot, icons, tiers).sync()  # type: ignore[arg-type]
+    assert len(bot.created) == 15
 
 
 async def test_the_cog_never_raises_and_does_nothing_when_off(db):
@@ -199,7 +211,7 @@ async def test_the_cog_never_raises_and_does_nothing_when_off(db):
         async def fetch_application_emojis(self):
             raise RuntimeError("boom")
 
-    await Icons(Broken(), service(db)).sync()  # type: ignore[arg-type]
+    await Icons(Broken(), service(db), tier_service(db)).sync()  # type: ignore[arg-type]
     bot = FakeEmojiBot()
-    await Icons(bot, service(db, enabled=False)).sync()  # type: ignore[arg-type]
+    await Icons(bot, service(db, enabled=False), tier_service(db, enabled=False)).sync()  # type: ignore[arg-type]
     assert bot.created == []

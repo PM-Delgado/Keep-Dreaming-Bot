@@ -33,7 +33,7 @@ include = ["bot*"]
 [tool.setuptools.package-data]
 "bot.features.nameday" = ["seed/*.json"]
 "bot.features.champions" = ["seed/*.json"]
-"bot.features.icons" = ["roles/*.png"]
+"bot.features.icons" = ["roles/*.png", "tiers/*.png"]
 
 [tool.ruff]
 line-length = 100
