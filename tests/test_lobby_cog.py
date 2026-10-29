@@ -1062,7 +1062,7 @@ async def test_the_extension_registers_commands_and_a_persistent_view():
         cog: Any = bot.get_cog("Lobby")
         assert cog is not None
         assert cog.mock.enabled is True
-        assert cog.service.params.ready_check_seconds == 120
+        assert cog.service.params.ready_check_seconds == 900
         top = {c.name: c for c in bot.tree.get_commands()}
         lobby_commands: Any = top["lobby"]
         mock_commands: Any = top["mock"]

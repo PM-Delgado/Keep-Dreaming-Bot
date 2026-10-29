@@ -79,3 +79,12 @@ def test_scrim_channel_and_role_are_optional_numeric_ids():
 def test_a_scrim_id_that_is_not_a_number_is_refused(name):
     with pytest.raises(ConfigError, match=name):
         load_settings({**VALID, name: "#scrim"})
+
+
+def test_the_ready_check_lasts_fifteen_minutes_unless_set():
+    assert load_settings(VALID).ready_check_seconds == 900
+    assert load_settings({**VALID, "READY_CHECK_SECONDS": "30"}).ready_check_seconds == 30
+    assert load_settings({**VALID, "READY_CHECK_SECONDS": "900"}).ready_check_seconds == 900
+    for bad in ("901", "5", "abc"):  # 900 stays the most the setting allows
+        with pytest.raises(ConfigError, match="READY_CHECK_SECONDS"):
+            load_settings({**VALID, "READY_CHECK_SECONDS": bad})

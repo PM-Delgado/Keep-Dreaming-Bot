@@ -167,7 +167,7 @@ OPEN -> READY_CHECK -> TEAMS_PROPOSED -> IN_PROGRESS -> COMPLETED
 
 1. **Open / schedule.** `/lobby open` or `/lobby schedule`; people join with buttons. A scheduled
    lobby reminds its sign-ups 30 minutes before and starts its ready-check at the chosen time.
-2. **Ready-check** (default 2 minutes) at ten players. Silent players are dropped and replaced
+2. **Ready-check** (default 15 minutes) at ten players. Silent players are dropped and replaced
    from the reserves, otherwise the lobby returns to OPEN.
 3. **Teams proposed** by the balancer; the creator or an admin confirms. That creates the *match*
    and freezes what the balancer saw (H, E, R per player).
