@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from discord.ext import commands, tasks
 
 from bot.features.icons.roles import RoleEmojiRepository, RoleIconService
+from bot.features.icons.tiers import TierEmojiRepository, TierIconService
 from bot.features.icons.upload import application_emojis
 
 if TYPE_CHECKING:
@@ -21,12 +22,14 @@ SYNC_HOURS = 24
 
 
 class Icons(commands.Cog):
-    def __init__(self, bot: "KDBot", roles: RoleIconService) -> None:
+    def __init__(self, bot: "KDBot", roles: RoleIconService, tiers: TierIconService) -> None:
         self.bot = bot
         self.roles = roles
+        self.tiers = tiers
 
     async def cog_load(self) -> None:
         await self.roles.load()
+        await self.tiers.load()
         self.syncer.start()
 
     async def cog_unload(self) -> None:
@@ -47,10 +50,13 @@ class Icons(commands.Cog):
         try:
             existing, upload = await application_emojis(self.bot)
             await self.roles.sync(existing, upload)
+            await self.tiers.sync(existing, upload)
         except Exception:
-            log.exception("Role icon sync failed")
+            log.exception("Role and rank icon sync failed")
 
 
 async def setup(bot: "KDBot") -> None:
-    roles = RoleIconService(RoleEmojiRepository(bot.db), enabled=bot.settings.champion_icons)
-    await bot.add_cog(Icons(bot, roles))
+    enabled = bot.settings.champion_icons
+    roles = RoleIconService(RoleEmojiRepository(bot.db), enabled=enabled)
+    tiers = TierIconService(TierEmojiRepository(bot.db), enabled=enabled)
+    await bot.add_cog(Icons(bot, roles, tiers))

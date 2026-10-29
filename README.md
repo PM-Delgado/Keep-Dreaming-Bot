@@ -159,8 +159,9 @@ Read once at start-up from the environment or `.env` (`bot/config.py`; see `.env
 | `RIOT_API_KEY` | no | | Enables the `/riot` commands. Without it ranks and roles are set manually. |
 | `RIOT_DEFAULT_PLATFORM` | no | `euw1` | Platform used when `/riot link` does not specify one. |
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
-| `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis); names are used where an icon is missing. See [docs/riot-data.md](docs/riot-data.md). |
+| `CHAMPION_ICONS` | no | on | Show champion, role and rank icons (Riot images, uploaded once as bot emojis); names are used where an icon is missing. See [docs/riot-data.md](docs/riot-data.md). |
 | `SCRIM_CHANNEL_ID` | no | any channel | The only channel where `/lobby open`, `/lobby schedule` and `/lobby show` work. |
+| `RIOT_FEED_CHANNEL_ID` | no | off | The channel where the bot posts the daily Solo/Duo leaderboard (10:00 Lisbon). Needs `RIOT_API_KEY`. |
 | `SCRIM_ROLE_ID` | no | no tag | The role tagged (inside a spoiler) when a lobby is opened or scheduled. It must be mentionable, or the bot needs the "Mention @everyone, @here and All Roles" permission; the start-up log says if it is not. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
@@ -190,7 +191,7 @@ bot/
     players/       roster, role proficiency, profile, admin rating and role commands
     riot/          optional Riot API client, role experience, /riot commands
     champions/     champion list from Data Dragon (cached, with a bundled seed)
-    icons/         role icons (bundled PNGs uploaded as application emojis), shared upload helper
+    icons/         role and rank icons (bundled PNGs uploaded as application emojis), shared upload helper
     ratings/       pure rating core: rank estimate, matchmaking estimate, ladder, OpenSkill, replay
     balance/       pure team balancer
     lobby/         lobby state machine, messages, buttons, /lobby /match /mock commands
@@ -235,7 +236,7 @@ Scrims, so far. Other features are added as the Keep Dreaming community asks for
 ## 🙏 Acknowledgements
 
 Built with [discord.py](https://github.com/Rapptz/discord.py) and [OpenSkill](https://github.com/OpenDebates/openskill.py)
-for the team ratings. Champion data and icons come from Riot's Data Dragon, and the role icons from
+for the team ratings. Champion data and icons come from Riot's Data Dragon, and the role and rank icons from
 [Community Dragon](https://www.communitydragon.org).
 
 ## 📜 Riot Games disclaimer

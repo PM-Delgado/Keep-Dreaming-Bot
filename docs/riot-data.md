@@ -36,7 +36,9 @@ owns it. Linked account names are visible to everyone in the server.
 |---|---|---|
 | `riot_accounts` | PUUID, current Riot ID, platform, main flag, who linked it and when | yes |
 | `riot_role_games` | per ranked Solo/Duo game: id, time, position, win, K/D/A, duration, champion, CS and a few totals; shown by `/riot history` | yes |
-| `rank_signals` (source `riot`) | the account's Solo/Duo tier, division and LP over time | yes |
+| `rank_signals` (source `riot`) | the account's Solo/Duo tier and division over time (feeds the in-house rating) | yes |
+| `riot_accounts.rank_*` | the account's last looked-up Solo/Duo tier, division and LP (leaderboard); empty tier = unranked | yes (the row) |
+| `riot_rank_snapshots` | one row per main account per day (tier, division, LP), written when the daily leaderboard is posted, for the LP trend | yes (cascade) |
 | `rating_events` | numeric rating seeds; never contains a Riot ID | no |
 
 After an unlink nothing in the database references the PUUID, and ratings are unaffected. Only the
@@ -53,6 +55,7 @@ saved data is.
 | `/riot history` | new ranked games of the accounts shown | 5 minutes (per account) |
 | A ready-check starts | the main account's rank of each of the ten players | 60 minutes |
 | A timer, every 6 hours | Riot IDs and rank of every linked account | every account, in the background |
+| The daily leaderboard (10:00 Lisbon, `RIOT_FEED_CHANNEL_ID` set) and `/riot leaderboard` | the Solo/Duo tier, division and LP of every **main** account (one league-v4 request each, background) | daily: always; `/riot leaderboard`: a main missing or older than 1 hour (waits up to 10 seconds) |
 
 A failed lookup is only logged and the saved data is shown. If Riot rejects the key, the bot logs a
 warning and messages the admins listed in `ADMIN_USER_IDS` at most once a day.
@@ -65,9 +68,9 @@ under the personal-key limits (18 requests per second, 90 per 2 minutes), honour
 HTTP 429, and reserves part of each window for interactive commands so background syncs never starve
 them.
 
-## Champion and role icons
+## Champion, role and rank icons
 
 Champion icons come from Riot's Data Dragon (`ddragon.leagueoflegends.com`); the five role icons in
 `bot/features/icons/roles/` were rendered from the game client's position SVGs as published by
 [Community Dragon](https://www.communitydragon.org). Each is uploaded once as a Discord application
-emoji. Set `CHAMPION_ICONS=false` to stop uploading and showing them; names are used instead.
+emoji. The ten rank icons in `bot/features/icons/tiers/` are the ranked emblems published by Community Dragon, cropped and resized to 128 px, uploaded the same way (`tier_emojis`) and shown in the Solo/Duo leaderboard; without an uploaded icon a colour dot is shown. Set `CHAMPION_ICONS=false` to stop uploading and showing all of them; names are used instead.

@@ -9,6 +9,7 @@ from typing import Any
 from bot.db import Database
 from bot.features.ratings.repository import from_db, to_db
 from bot.features.riot.client import RankedGame
+from bot.features.riot.leaderboard import MainRank
 from bot.features.riot.roles import GameObservation
 
 
@@ -307,3 +308,81 @@ class RiotRepository:
         ) as cur:
             rows = await cur.fetchall()
         return [GameObservation(from_db(r[0]), r[1], r[2], r[3], bool(r[4])) for r in rows]
+
+    # --- feed: last known rank, daily snapshots ---------------------------------------------
+
+    async def main_accounts(self) -> list[AccountRow]:
+        """The main account of every real player still in the group."""
+        async with self.db.conn.execute(
+            "SELECT "
+            + ", ".join(f"a.{c.strip()}" for c in _COLUMNS.split(","))
+            + " FROM riot_accounts a JOIN players p ON p.id = a.player_id"
+            " WHERE a.is_main = 1 AND p.is_mock = 0 AND p.left_at IS NULL ORDER BY a.id"
+        ) as cur:
+            return [_account(r) for r in await cur.fetchall()]
+
+    async def main_ranks(self) -> list[MainRank]:
+        async with self.db.conn.execute(
+            "SELECT a.id, p.nickname, a.game_name, a.tag_line, a.rank_tier, a.rank_division,"
+            " a.rank_lp FROM riot_accounts a JOIN players p ON p.id = a.player_id"
+            " WHERE a.is_main = 1 AND p.is_mock = 0 AND p.left_at IS NULL"
+        ) as cur:
+            return [
+                MainRank(r[0], r[1], f"{r[2]}#{r[3]}", r[4], r[5], r[6])
+                for r in await cur.fetchall()
+            ]
+
+    async def last_rank_check(self) -> datetime | None:
+        """When the newest saved main-account rank was looked up."""
+        async with self.db.conn.execute(
+            "SELECT MAX(rank_checked_at) FROM riot_accounts WHERE is_main = 1"
+        ) as cur:
+            row = await cur.fetchone()
+        return from_db(row[0]) if row and row[0] else None
+
+    async def mains_checked_before(self, cutoff: datetime) -> int:
+        """How many main accounts have no saved rank lookup, or one older than `cutoff`."""
+        async with self.db.conn.execute(
+            "SELECT COUNT(*) FROM riot_accounts a JOIN players p ON p.id = a.player_id"
+            " WHERE a.is_main = 1 AND p.is_mock = 0 AND p.left_at IS NULL"
+            " AND (a.rank_checked_at IS NULL OR a.rank_checked_at < ?)",
+            (to_db(cutoff),),
+        ) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else 0
+
+    async def set_rank(
+        self,
+        account_id: int,
+        tier: str | None,
+        division: str | None,
+        lp: int | None,
+        checked_at: datetime,
+    ) -> None:
+        """Save the account's current Solo/Duo rank (tier None = confirmed unranked)."""
+        await self.db.conn.execute(
+            "UPDATE riot_accounts SET rank_tier = ?, rank_division = ?, rank_lp = ?,"
+            " rank_checked_at = ? WHERE id = ?",
+            (tier, division, lp, to_db(checked_at), account_id),
+        )
+        await self.db.conn.commit()
+
+    async def save_snapshot(
+        self, account_id: int, day: str, tier: str | None, division: str | None, lp: int | None
+    ) -> None:
+        await self.db.conn.execute(
+            "INSERT OR REPLACE INTO riot_rank_snapshots (riot_account_id, day, tier, division, lp)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (account_id, day, tier, division, lp),
+        )
+        await self.db.conn.commit()
+
+    async def previous_snapshots(self, day: str) -> list[tuple[int, str, str | None, int]]:
+        """(account id, tier, division, lp) of the newest ranked snapshot before `day`."""
+        async with self.db.conn.execute(
+            "SELECT s.riot_account_id, s.tier, s.division, s.lp FROM riot_rank_snapshots s"
+            " WHERE s.tier IS NOT NULL AND s.lp IS NOT NULL AND s.day = (SELECT MAX(day) FROM"
+            " riot_rank_snapshots WHERE riot_account_id = s.riot_account_id AND day < ?)",
+            (day,),
+        ) as cur:
+            return [(r[0], r[1], r[2], r[3]) for r in await cur.fetchall()]
