@@ -2,9 +2,9 @@
 (names, icons, the rank after the game, the LP change) is passed in.
 
     ┃ [avatar] Nickname (Name#TAG)                                  [champion]
-    ┃ Ganhou 27 LP (Solo/Duo)
+    ┃ Ganhou (Solo/Duo)
     ┃ [role] **Yone**
-    ┃ [tier] MASTER · 790 LP
+    ┃ [tier] MASTER · 790 LP (📈 **+27**)
     ┃ 🔥 Quadra kill
     ┃ **KDA** 8/3/11 (6.3)   **Duração** 30:28   **Participação** 76%
     ┃ **CS** 212 (7.0/min)   **Dano** 24.1k (791/min)   **Visão** 38 (1.25/min)
@@ -72,14 +72,22 @@ def result_color(game: RankedGame) -> discord.Color:
     return discord.Color.green() if game.win else discord.Color.red()
 
 
-def title_text(game: RankedGame, lp_delta: int | None) -> str:
-    """`Ganhou 27 LP (Solo/Duo)`; the number is left out when the LP change is unknown, and a
-    remake never has one."""
+def title_text(game: RankedGame) -> str:
+    """`Ganhou (Solo/Duo)`, `Perdeu (Solo/Duo)` or `Remake (Solo/Duo)`: the result only, the LP
+    change is next to the rank."""
     if is_remake(game):
         return "Remake (Solo/Duo)"
-    if lp_delta:  # not None and not 0
-        return f"{'Ganhou' if lp_delta > 0 else 'Perdeu'} {abs(lp_delta)} LP (Solo/Duo)"
     return f"{'Ganhou' if game.win else 'Perdeu'} (Solo/Duo)"
+
+
+def rank_text(rank: SoloRank, lp_delta: int | None, icon: str = "") -> str:
+    """`[icon] GOLD I · 29 LP (📉 **-21**)`: the LP the game changed in brackets, with an arrow
+    and in bold so it stands out. Left out when unknown (None) or zero, never guessed."""
+    text = f"{icon} {rank_label(rank.tier, rank.division, rank.lp)}".strip()
+    if lp_delta:
+        arrow = "📈" if lp_delta > 0 else "📉"
+        text += f" ({arrow} **{lp_delta:+d}**)"
+    return text
 
 
 def duration_text(seconds: int) -> str:
@@ -159,12 +167,11 @@ def build_card_embed(
     if card.rank is not None:
         tier = card.rank.tier.upper()
         icon = (tier_icons or {}).get(tier) or TIER_DOTS.get(tier, "")
-        label = rank_label(card.rank.tier, card.rank.division, card.rank.lp)
-        lines.append(f"{icon} {label}".strip())
+        lines.append(rank_text(card.rank, None if is_remake(game) else card.lp_delta, icon))
     if (kill := best_multikill(game)) is not None:
         lines.append(kill)
     embed = discord.Embed(
-        title=title_text(game, card.lp_delta),
+        title=title_text(game),
         description="\n".join(lines),
         color=result_color(game),
         timestamp=game.played_at,

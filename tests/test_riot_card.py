@@ -18,6 +18,7 @@ from bot.features.riot.card import (
     DIVIDER,
     CardData,
     build_card_embed,
+    rank_text,
     stat_fields,
     title_text,
 )
@@ -318,9 +319,13 @@ def test_the_card_has_the_agreed_layout():
     embed = build_card_embed(card(), {"MID": "<:role_mid:1>"}, {"MASTER": "<:tier_master:2>"})
     assert embed.author.name == "Exduardo (Exduardo#EUW)"
     assert embed.author.icon_url == "https://cdn.invalid/avatar.png"
-    assert embed.title == "Ganhou 27 LP (Solo/Duo)"
+    assert embed.title == "Ganhou (Solo/Duo)"  # the result only
     assert embed.description == "\n".join(
-        ["<:role_mid:1> **Yone**", "<:tier_master:2> MASTER · 790 LP", "🔥 Quadra kill"]
+        [
+            "<:role_mid:1> **Yone**",
+            "<:tier_master:2> MASTER · 790 LP (📈 **+27**)",  # the LP change next to the rank
+            "🔥 Quadra kill",
+        ]
     )
     assert embed.thumbnail.url == "https://ddragon.invalid/yone.png"
     assert embed.color == discord.Color.green()
@@ -335,15 +340,31 @@ def test_the_card_has_the_agreed_layout():
     )
 
 
-def test_the_title_follows_the_lp_change_and_the_side_bar_the_result():
-    assert build_card_embed(card(lp_delta=-19, game=game(win=False))).title == (
-        "Perdeu 19 LP (Solo/Duo)"
-    )
-    assert build_card_embed(card(lp_delta=-19, game=game(win=False))).color == discord.Color.red()
-    # Unknown or zero LP change: the number is left out, never guessed.
-    assert title_text(game(), None) == "Ganhou (Solo/Duo)"
-    assert title_text(game(), 0) == "Ganhou (Solo/Duo)"
-    assert title_text(game(win=False), None) == "Perdeu (Solo/Duo)"
+def test_the_title_is_the_result_and_the_side_bar_has_its_colour():
+    loss = build_card_embed(card(lp_delta=-21, game=game(win=False)))
+    assert loss.title == "Perdeu (Solo/Duo)"  # no LP number in the title
+    assert loss.color == discord.Color.red()
+    assert title_text(game()) == "Ganhou (Solo/Duo)"
+    assert title_text(game(win=False)) == "Perdeu (Solo/Duo)"
+    assert title_text(game(duration_s=200)) == "Remake (Solo/Duo)"
+
+
+def test_the_lp_change_sits_next_to_the_rank_with_an_arrow_and_in_bold():
+    gold = SoloRank("GOLD", "I", 29)
+    assert rank_text(gold, -21) == "GOLD I · 29 LP (📉 **-21**)"
+    assert rank_text(gold, 27, "<:tier_gold:5>") == "<:tier_gold:5> GOLD I · 29 LP (📈 **+27**)"
+    # Unknown (None) or zero: the rank alone, never a guess.
+    assert rank_text(gold, None) == "GOLD I · 29 LP"
+    assert rank_text(gold, 0) == "GOLD I · 29 LP"
+    lost = build_card_embed(card(lp_delta=-21, game=game(win=False), rank=gold))
+    assert "GOLD I · 29 LP (📉 **-21**)" in desc(lost)
+    unknown = build_card_embed(card(lp_delta=None, rank=gold))
+    assert "(" not in desc(unknown).split("\n")[1]  # no brackets without a number
+
+
+def test_a_game_with_no_rank_line_shows_no_lp_at_all():
+    embed = build_card_embed(card(rank=None, lp_delta=27))
+    assert "LP" not in desc(embed) and "+27" not in desc(embed)
 
 
 def test_a_remake_is_grey_and_has_no_lp():
@@ -351,6 +372,7 @@ def test_a_remake_is_grey_and_has_no_lp():
         embed = build_card_embed(card(game=remake, lp_delta=12))
         assert embed.title == "Remake (Solo/Duo)"
         assert embed.color == discord.Color.light_grey()
+        assert "12" not in desc(embed)  # a remake never shows an LP change
 
 
 def test_every_role_gets_the_same_laning_block_cs_included():

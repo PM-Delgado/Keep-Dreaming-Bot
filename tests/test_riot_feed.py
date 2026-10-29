@@ -509,7 +509,8 @@ async def test_posting_a_card_sends_it_with_the_lp_title_and_the_avatar(stack, w
     cog = feed_cog(stack, channel, Guild({1: member(1)}))
     assert await cog.post_card(posts.items[0]) is True
     sent = channel.sent[0]
-    assert sent["embed"].title == "Ganhou 27 LP (Solo/Duo)"
+    assert sent["embed"].title == "Ganhou (Solo/Duo)"
+    assert "MASTER · 127 LP (📈 **+27**)" in sent["embed"].description  # the LP, next to the rank
     assert sent["embed"].author.name == "Ana (Alpha#EUW)"
     assert sent["embed"].author.icon_url == "https://cdn.invalid/a.png"
     assert sent["allowed_mentions"].users is False  # nobody is pinged
@@ -562,7 +563,8 @@ async def test_the_loop_runs_a_cycle_and_a_discord_failure_leaves_the_game_for_n
     channel = Channel()
     cog = feed_cog(stack, channel, Guild({1: member(1)}))
     await cog.feed_poller.coro(cog)
-    assert [m["embed"].title for m in channel.sent] == ["Ganhou 27 LP (Solo/Duo)"]
+    assert [m["embed"].title for m in channel.sent] == ["Ganhou (Solo/Duo)"]
+    assert "(📈 **+27**)" in channel.sent[0]["embed"].description
     assert await pending(stack, await alpha(stack)) == []
 
 
