@@ -312,6 +312,27 @@ MIGRATIONS: list[str] = [
         emoji_name TEXT NOT NULL
     );
     """,
+    # 12: Riot feed (daily leaderboard, post-game cards). `rank_*` is the last Solo/Duo rank the
+    # feed saw for the account (tier NULL + `rank_checked_at` set = unranked): the leaderboard reads
+    # it and the post-game LP change is computed against it. `riot_rank_snapshots` is one row per
+    # account per day (written when the leaderboard is posted) for the daily LP trend.
+    # Unlinking deletes both (cascade).
+    """
+    ALTER TABLE riot_accounts ADD COLUMN feed_since TEXT;
+    ALTER TABLE riot_accounts ADD COLUMN feed_enabled INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE riot_accounts ADD COLUMN rank_tier TEXT;
+    ALTER TABLE riot_accounts ADD COLUMN rank_division TEXT;
+    ALTER TABLE riot_accounts ADD COLUMN rank_lp INTEGER;
+    ALTER TABLE riot_accounts ADD COLUMN rank_checked_at TEXT;
+    CREATE TABLE riot_rank_snapshots (
+        riot_account_id INTEGER NOT NULL REFERENCES riot_accounts(id) ON DELETE CASCADE,
+        day             TEXT NOT NULL,  -- Lisbon date, YYYY-MM-DD
+        tier            TEXT,
+        division        TEXT,
+        lp              INTEGER,
+        PRIMARY KEY (riot_account_id, day)
+    );
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

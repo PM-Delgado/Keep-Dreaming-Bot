@@ -5,6 +5,7 @@ rest of the bot (manual ranks, proficiency, ratings) is unaffected.
 """
 
 import asyncio
+import datetime as dt
 import logging
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from bot.features.players.text import tier_color
 from bot.features.ratings.service import RatingError
 from bot.features.riot.client import RiotClient
 from bot.features.riot.history import format_ago, format_line, format_summary, summarize, to_entry
+from bot.features.riot.leaderboard import LISBON
 from bot.features.riot.platforms import PLATFORMS
 from bot.features.riot.repository import AccountRow, RiotRepository
 from bot.features.riot.service import (
@@ -30,6 +32,7 @@ from bot.features.riot.service import (
     RankOutcome,
     RiotService,
 )
+from bot.features.riot.views import LeaderboardView, leaderboard_message
 from bot.interaction_log import log_refusal
 from bot.permissions import is_admin
 
@@ -126,6 +129,11 @@ def build_history_embed(
 
 
 REFRESH_HOURS = 6  # the timer that refreshes every linked account (a restart does not run it)
+LEADERBOARD_TIME = dt.time(hour=10, minute=0, tzinfo=LISBON)  # the daily leaderboard post
+NOT_ADMIN_POST = "Só admins podem publicar o leaderboard no canal."
+NO_FEED_CHANNEL = (
+    "Não há canal do feed: define `RIOT_FEED_CHANNEL_ID` (e confirma que o bot lá pode escrever)."
+)
 KEY_LOG_EVERY = timedelta(hours=1)
 KEY_DM_EVERY = timedelta(hours=24)
 KEY_ALERT = (
@@ -191,9 +199,14 @@ class Riot(commands.Cog):
 
     async def cog_load(self) -> None:
         self.refresher.start()
+        # One registered view answers every leaderboard message, even those posted before a restart.
+        self.bot.add_view(LeaderboardView(self.service))
+        if self.bot.settings.riot_feed_channel_id is not None and self.service.enabled:
+            self.daily_leaderboard.start()
 
     async def cog_unload(self) -> None:
         self.refresher.cancel()
+        self.daily_leaderboard.cancel()
         if self.service.client is not None:
             await self.service.client.close()
 
@@ -209,6 +222,37 @@ class Riot(commands.Cog):
     @refresher.before_loop
     async def _before_refresher(self) -> None:
         await self.bot.wait_until_ready()
+
+    @tasks.loop(time=LEADERBOARD_TIME)
+    async def daily_leaderboard(self) -> None:
+        try:
+            await self.post_leaderboard(snapshot=True)
+        except Exception:
+            log.exception("The daily leaderboard post crashed")
+
+    @daily_leaderboard.before_loop
+    async def _before_daily_leaderboard(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def post_leaderboard(self, snapshot: bool) -> bool:
+        """Look up the mains' ranks and post the leaderboard in the feed channel. `snapshot`
+        (the daily post) also records the day's ranks, which tomorrow's LP trend is measured
+        against. False when there is no usable channel; Riot problems only mean older ranks."""
+        channel_id = self.bot.settings.riot_feed_channel_id
+        channel = self.bot.get_channel(channel_id) if channel_id is not None else None
+        if not isinstance(channel, discord.abc.Messageable):
+            log.warning("Riot feed channel %s not found: leaderboard not posted.", channel_id)
+            return False
+        await self.service.refresh_main_ranks()
+        if snapshot:
+            await self.service.save_daily_snapshot()
+        try:
+            await channel.send(**await leaderboard_message(self.service))
+        except discord.HTTPException as exc:
+            log.warning("Could not post the leaderboard: %s", exc.status)
+            return False
+        log.info("Posted the Solo/Duo leaderboard in channel %s", channel_id)
+        return True
 
     async def _color(self, player_id: int) -> discord.Color:
         """The side bar has the colour of the player's League Solo/Duo tier, as on the profile."""
@@ -403,6 +447,35 @@ class Riot(commands.Cog):
                 await self._color((await self.service.players.require(target.id)).id),
             ),
             allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @riot.command(name="leaderboard", description="Classificação Solo/Duo das contas principais.")
+    @app_commands.describe(post="Só admins: publicar também no canal do feed (atualiza os ranks).")
+    async def leaderboard(self, interaction: discord.Interaction, post: bool = False) -> None:
+        if post:
+            await self._post_leaderboard_command(interaction)
+            return
+        send = interaction.response.send_message
+        if await self.service.leaderboard_stale():
+            await interaction.response.defer()
+            await self.service.refresh_ranks_for_view()
+            send = interaction.followup.send
+        await send(**await leaderboard_message(self.service))
+
+    async def _post_leaderboard_command(self, interaction: discord.Interaction) -> None:
+        if not is_admin(self.bot.settings, interaction.user.id):
+            await interaction.response.send_message(NOT_ADMIN_POST, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            posted = await self.post_leaderboard(snapshot=False)
+        except PlayerError as exc:
+            log_refusal(interaction, exc)
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        await interaction.followup.send(
+            "📨 Leaderboard publicado no canal do feed." if posted else NO_FEED_CHANNEL,
+            ephemeral=True,
         )
 
     @riot.command(name="refresh", description="Atualiza nomes, rank e histórico ranked.")

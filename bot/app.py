@@ -45,6 +45,7 @@ class KDBot(commands.Bot):
             f" mock_players={_on_off(s.mock_players)} icons={_on_off(s.champion_icons)}"
             f" ready_check={s.ready_check_seconds}s log_level={s.log_level}"
             f" scrim_channel={s.scrim_channel_id or 'off'} scrim_role={_on_off(s.scrim_role_id)}"
+            f" riot_feed_channel={s.riot_feed_channel_id or 'off'}"
         )
 
     async def setup_hook(self) -> None:

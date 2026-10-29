@@ -161,6 +161,7 @@ Read once at start-up from the environment or `.env` (`bot/config.py`; see `.env
 | `READY_CHECK_SECONDS` | no | `120` | Ready-check length. |
 | `CHAMPION_ICONS` | no | on | Show champion and role icons (Riot images, uploaded once as bot emojis); names are used where an icon is missing. See [docs/riot-data.md](docs/riot-data.md). |
 | `SCRIM_CHANNEL_ID` | no | any channel | The only channel where `/lobby open`, `/lobby schedule` and `/lobby show` work. |
+| `RIOT_FEED_CHANNEL_ID` | no | off | The channel where the bot posts the daily Solo/Duo leaderboard (10:00 Lisbon). Needs `RIOT_API_KEY`. |
 | `SCRIM_ROLE_ID` | no | no tag | The role tagged (inside a spoiler) when a lobby is opened or scheduled. It must be mentionable, or the bot needs the "Mention @everyone, @here and All Roles" permission; the start-up log says if it is not. |
 | `ENABLE_MOCK_PLAYERS` | no | off | Enables the `/mock` commands. Leave off in production. |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. |

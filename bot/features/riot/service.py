@@ -21,6 +21,8 @@ from bot.features.riot.client import (
     RiotRateLimited,
     SoloRank,
 )
+from bot.features.riot.leaderboard import LISBON, Row, build_rows
+from bot.features.riot.lp import ladder_points
 from bot.features.riot.platforms import normalise_platform
 from bot.features.riot.repository import (
     AccountRow,
@@ -43,6 +45,8 @@ HISTORY_MAX_AGE = timedelta(hours=6)  # ranked history is re-synced (in the back
 VIEW_WAIT_S = 4.0  # a command waits this long for Riot, then shows what is saved
 HISTORY_VIEW_MAX_AGE = timedelta(minutes=5)  # /riot history asks Riot for new games after this
 SAME_RANK_STORED_EVERY = timedelta(days=1)  # an unchanged rank is saved again at most this often
+LEADERBOARD_MAX_AGE = timedelta(hours=1)  # /riot leaderboard looks the mains' ranks up after this
+LEADERBOARD_WAIT_S = 10.0  # ... and waits this long for Riot, then shows the saved ranks
 
 CONSENT_NOTICE = (
     "**Dados da Riot: o que acontece**\n"
@@ -695,3 +699,84 @@ class RiotService:
         return estimate_proficiency(
             role_experience(games, self.clock(), self.history), self.history
         )
+
+    # --- daily leaderboard ------------------------------------------------------------------
+
+    def _today(self) -> str:
+        """The Lisbon date, which names a day's snapshot."""
+        return self.clock().astimezone(LISBON).date().isoformat()
+
+    async def refresh_main_ranks(self) -> int:
+        """Look up the Solo/Duo rank (tier, division, LP) of every main account and save it for
+        the leaderboard. Background work. Stops at a rejected key or a rate limit; any other
+        failure only skips that account (its previous rank stays). Returns how many were saved."""
+        client = self._client()
+        saved = failed = 0
+        for account in await self.repo.main_accounts():
+            try:
+                rank = await client.solo_rank(account.puuid, account.platform, background=True)
+            except (RiotAuthError, RiotRateLimited) as exc:
+                log.warning("Leaderboard rank refresh stopped: %s", type(exc).__name__)
+                break
+            except RiotError as exc:
+                failed += 1
+                log.warning(
+                    "Leaderboard rank of account %s failed: %s", account.id, type(exc).__name__
+                )
+                continue
+            await self.repo.set_rank(
+                account.id,
+                rank.tier if rank else None,
+                rank.division if rank else None,
+                rank.lp if rank else None,
+                self.clock(),
+            )
+            saved += 1
+        log.info("Leaderboard ranks refreshed: %d saved, %d failed", saved, failed)
+        return saved
+
+    async def refresh_ranks_for_view(self) -> bool:
+        """For `/riot leaderboard`: look the mains' ranks up when any is missing or older than
+        `LEADERBOARD_MAX_AGE`, waiting up to `LEADERBOARD_WAIT_S`. True if it had to ask Riot.
+        Never raises: a failure only means the saved ranks are shown."""
+        if self.client is None:
+            return False
+        cutoff = self.clock() - LEADERBOARD_MAX_AGE
+        if not await self.repo.mains_checked_before(cutoff):
+            return False
+        task = self._spawn(self._refresh_mains_quietly())
+        try:
+            await asyncio.wait_for(asyncio.shield(task), LEADERBOARD_WAIT_S)
+        except TimeoutError:
+            log.info("Leaderboard rank refresh still running: showing the saved ranks.")
+        return True
+
+    async def _refresh_mains_quietly(self) -> None:
+        try:
+            await self.refresh_main_ranks()
+        except Exception:
+            log.exception("Leaderboard rank refresh crashed")
+
+    async def leaderboard_stale(self) -> bool:
+        """Whether showing the leaderboard would first ask Riot (cheap: no network)."""
+        if self.client is None:
+            return False
+        return bool(await self.repo.mains_checked_before(self.clock() - LEADERBOARD_MAX_AGE))
+
+    async def save_daily_snapshot(self) -> None:
+        """Record today's rank of every main account: tomorrow's trend is measured against it."""
+        day = self._today()
+        for main in await self.repo.main_ranks():
+            await self.repo.save_snapshot(main.account_id, day, main.tier, main.division, main.lp)
+
+    async def leaderboard(self) -> tuple[list[Row], datetime]:
+        """The ordered rows (with the LP trend since the last earlier snapshot) and when the saved
+        ranks were last looked up. Costs no Riot requests."""
+        previous: dict[int, int] = {}
+        for account_id, tier, division, lp in await self.repo.previous_snapshots(self._today()):
+            try:
+                previous[account_id] = ladder_points(tier, division, lp)
+            except ValueError:
+                continue
+        updated = await self.repo.last_rank_check() or self.clock()
+        return build_rows(await self.repo.main_ranks(), previous), updated

@@ -37,6 +37,9 @@ class Settings:
     # (inside a spoiler). Unset (the default, e.g. a development server) = any channel, no tag.
     scrim_channel_id: int | None = None
     scrim_role_id: int | None = None
+    # Riot feed: the daily Solo/Duo leaderboard and the post-game cards are posted in this channel.
+    # Unset = neither is posted (the /riot commands still work).
+    riot_feed_channel_id: int | None = None
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -76,6 +79,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         log_dir=_parse_log_dir(env.get("LOG_DIR", "logs")),
         scrim_channel_id=_parse_optional_id(env, "SCRIM_CHANNEL_ID"),
         scrim_role_id=_parse_optional_id(env, "SCRIM_ROLE_ID"),
+        riot_feed_channel_id=_parse_optional_id(env, "RIOT_FEED_CHANNEL_ID"),
     )
 
 
