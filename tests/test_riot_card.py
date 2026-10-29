@@ -14,6 +14,8 @@ from test_riot_leaderboard import Channel
 from bot.config import load_settings
 from bot.features.champions.service import ChampionService
 from bot.features.riot.card import (
+    BLANK,
+    DIVIDER,
     CardData,
     build_card_embed,
     stat_fields,
@@ -307,7 +309,7 @@ def test_the_stats_have_the_agreed_values():
         ("CS", "212 (7.0/min)"),
         ("Dano", "24.1k (791/min)\n32% da equipa"),
         ("Visão", "38 (1.25/min)"),
-        ("Ouro", "14.2k"),
+        ("Gold", "14.2k"),
         ("Pings", "9"),
     ]
 
@@ -323,14 +325,13 @@ def test_the_card_has_the_agreed_layout():
     assert embed.thumbnail.url == "https://ddragon.invalid/yone.png"
     assert embed.color == discord.Color.green()
     assert embed.timestamp == PLAYED
-    assert embed.footer.text == "Solo/Duo · 8028021803"  # no region prefix
+    assert embed.footer.text == "Solo/Duo"  # no match id, no region
     assert [f.name for f in embed.fields] == [
-        "KDA", "Duração", "Participação", "CS", "Dano", "Visão", "Ouro", "Pings",
-        "Stats @ 15 (vs Zed)",
+        "KDA", "Duração", "Participação", "CS", "Dano", "Visão", "Gold", "Pings", BLANK, DIVIDER,
     ]  # fmt: skip
-    assert [f.inline for f in embed.fields] == [True] * 8 + [False]
+    assert [f.inline for f in embed.fields] == [True] * 9 + [False]
     assert embed.fields[-1].value == (
-        "**CS** -1 · **Ouro** +146 · **XP** +380 · **Primeiro nível 2:** Não"
+        "**Stats @ 15 (vs Zed)**\n**CS** -1 | **Gold** +146 | **XP** +380 | **Nível 2 primeiro** ❌"
     )
 
 
@@ -352,24 +353,80 @@ def test_a_remake_is_grey_and_has_no_lp():
         assert embed.color == discord.Color.light_grey()
 
 
-def test_jungle_and_support_get_gold_and_xp_but_no_cs_difference():
-    for position in ("JUNGLE", "UTILITY"):
-        embed = build_card_embed(card(game=game(team_position=position)))
-        assert last_value(embed).startswith("**Ouro** +146")
-        assert "**CS**" not in last_value(embed)
-    top = build_card_embed(card(game=game(team_position="TOP")))
-    assert last_value(top).startswith("**CS** -1")
+def test_every_role_gets_the_same_laning_block_cs_included():
+    blocks = {
+        position: last_value(build_card_embed(card(game=game(team_position=position))))
+        for position in ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")
+    }
+    assert len(set(blocks.values())) == 1
+    assert "**CS** -1 | **Gold** +146" in blocks["JUNGLE"]
 
 
 def test_an_unknown_first_level_two_is_left_out_of_the_block():
     embed = build_card_embed(card(laning=Laning(-1, 146, 380, None)))
-    assert "Primeiro nível 2" not in last_value(embed)
+    assert "Nível 2 primeiro" not in last_value(embed)
 
 
 def test_the_laning_block_is_left_out_without_numbers_or_names_the_opponent_only_when_known():
-    assert "Stats @ 15" not in [f.name for f in build_card_embed(card(laning=None)).fields]
+    without = build_card_embed(card(laning=None))
+    assert DIVIDER not in [f.name for f in without.fields]  # no block, no divider
+    assert "Stats @ 15" not in " ".join(f.value or "" for f in without.fields)
     unnamed = build_card_embed(card(opponent_name=None))
-    assert unnamed.fields[-1].name == "Stats @ 15"
+    assert last_value(unnamed).startswith("**Stats @ 15**\n")
+
+
+def test_the_level_two_stat_is_a_check_or_a_cross_never_words():
+    won = last_value(build_card_embed(card(laning=Laning(0, 10, 20, True)))).split("\n")[1]
+    lost = last_value(build_card_embed(card(laning=Laning(0, 10, 20, False)))).split("\n")[1]
+    assert won.endswith(" | **Nível 2 primeiro** ✅")
+    assert lost.endswith(" | **Nível 2 primeiro** ❌")
+    assert "Sim" not in won + lost and "Não" not in won + lost
+
+
+def test_the_opponent_icon_goes_before_the_name_and_is_optional():
+    with_icon = build_card_embed(card(opponent_icon="<:champ_Zed:9>"))
+    assert last_value(with_icon).startswith("**Stats @ 15 (vs <:champ_Zed:9> Zed)**\n")
+    no_icon = build_card_embed(card(opponent_icon=""))
+    assert last_value(no_icon).startswith("**Stats @ 15 (vs Zed)**\n")  # name only, no stray space
+    nobody = build_card_embed(card(opponent_icon="<:champ_Zed:9>", opponent_name=None))
+    assert last_value(nobody).startswith("**Stats @ 15 (vs <:champ_Zed:9>)**\n")
+
+
+def test_the_four_laning_stats_have_one_style_and_a_bar_between_them():
+    line = last_value(build_card_embed(card())).split("\n")[1]
+    assert line.split(" | ") == [
+        "**CS** -1",
+        "**Gold** +146",
+        "**XP** +380",
+        "**Nível 2 primeiro** ❌",
+    ]
+    assert ":" not in line  # no colon on any of them
+    assert "·" not in line
+    three = last_value(build_card_embed(card(laning=Laning(5, -300, -120, None)))).split("\n")[1]
+    assert three == "**CS** +5 | **Gold** -300 | **XP** -120"  # negative numbers keep their sign
+
+
+def test_the_stat_fields_fill_whole_rows_of_three_so_the_columns_line_up():
+    some = {"damage": None, "gold": None, "vision_score": None, "pings": None, "team_kills": None}
+    stats = [
+        {**some, "cs": None},  # only KDA and duration left
+        some,
+        {"gold": None, "pings": None},
+        {"pings": None},
+        {},
+    ]
+    for missing in stats:
+        embed = build_card_embed(card(game=game(**missing), laning=None))
+        assert len(embed.fields) % 3 == 0, missing
+        assert all(f.inline for f in embed.fields)
+        padding = [f for f in embed.fields if f.name == BLANK]
+        assert len(padding) < 3 and all(f.value == BLANK for f in padding)
+
+
+def test_the_divider_is_a_line_in_the_last_field_that_sets_the_width():
+    embed = build_card_embed(card())
+    assert embed.fields[-1].name == DIVIDER and set(DIVIDER) == {"─"}
+    assert embed.fields[-1].inline is False
 
 
 def test_what_riot_did_not_send_is_left_out_not_shown_as_zero():
@@ -378,7 +435,7 @@ def test_what_riot_did_not_send_is_left_out_not_shown_as_zero():
         team_damage=None, double_kills=None, quadra_kills=None, penta_kills=None,
     )  # fmt: skip
     embed = build_card_embed(card(game=bare, laning=None, rank=None, lp_delta=None))
-    assert [f.name for f in embed.fields] == ["KDA", "Duração"]
+    assert [f.name for f in embed.fields] == ["KDA", "Duração", BLANK]
     assert embed.description == "Mid **Yone**"  # no rank line, no multikill line
     assert embed.title == "Ganhou (Solo/Duo)"
 
@@ -486,6 +543,9 @@ class FakeChampions:
     async def icon_link(self, champion_id):
         return f"https://ddragon.invalid/{champion_id}.png"
 
+    async def icon_markup(self, ids):
+        return {c: f"<:champ_{c}:9>" for c in ids}
+
 
 def make_cog(stack: Stack, channel: Channel | None = None, with_channel: bool = True) -> Riot:
     env = {**ENV, "RIOT_FEED_CHANNEL_ID": "555"} if with_channel else dict(ENV)
@@ -514,7 +574,7 @@ async def test_an_admin_sees_the_card_privately_and_nothing_is_posted(stack, wor
     assert reply["ephemeral"] is True
     embed = reply["embed"]
     assert embed.author.name == "Ana (Alpha#EUW)"
-    assert embed.fields[-1].name == "Stats @ 15 (vs Zed)"
+    assert "Stats @ 15 (vs <:champ_Zed:9> Zed)" in (embed.fields[-1].value or "")  # icon, then name
     assert embed.thumbnail.url == "https://ddragon.invalid/Yone.png"
     assert channel.sent == []
 

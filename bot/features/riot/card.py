@@ -8,12 +8,19 @@
     ┃ 🔥 Quadra kill
     ┃ **KDA** 8/3/11 (6.3)   **Duração** 30:28   **Participação** 76%
     ┃ **CS** 212 (7.0/min)   **Dano** 24.1k (791/min)   **Visão** 38 (1.25/min)
-    ┃ **Ouro** 14.2k         **Pings** 9
+    ┃ **Gold** 14.2k         **Pings** 9              (blank: keeps the three columns)
+    ┃ ──────────────────────────────────────
     ┃ **Stats @ 15 (vs Zed)**
-    ┃ **CS** -1 · **Ouro** +146 · **XP** +380 · **Primeiro nível 2:** Não
-    ┃ Solo/Duo · 8028021803
+    ┃ **CS** -1 | **Gold** +146 | **XP** +380 | **Nível 2 primeiro** ❌
+    ┃ Solo/Duo
 
 The side bar colour is the result. A stat Riot did not send is left out, never shown as 0.
+
+Discord has no divider element and no fixed card width: an embed is as wide as its widest line.
+The divider is a line of box-drawing characters in the name of the last field; being that wide it
+also sets the card's width, so every card with a laning block has the same width. The stat fields
+are padded with blank ones to a multiple of three, or the last row would be two wide columns that
+do not line up with the three above.
 """
 
 from collections.abc import Mapping
@@ -28,7 +35,9 @@ from bot.features.riot.leaderboard import TIER_DOTS
 from bot.features.riot.lp import rank_label
 from bot.features.riot.roles import RoleHistoryParams, position_role
 
-LANE_ROLES = ("TOP", "MID", "ADC")  # where a CS difference means something
+BLANK = "​"  # a zero-width space: Discord refuses an empty field name or value
+DIVIDER = "─" * 38  # the width in characters is a guess to tune on a real client
+COLUMNS = 3  # inline fields per row
 # Highest first: the card celebrates the best multikill only.
 MULTIKILLS = (
     ("penta_kills", "Penta kill"),
@@ -46,6 +55,7 @@ class CardData:
     champion_name: str
     laning: Laning | None = None
     opponent_name: str | None = None  # the lane opponent's champion, for "(vs Zed)"
+    opponent_icon: str = ""  # its emoji markup, shown before the name; empty = name only
     rank: SoloRank | None = None  # the rank after the game
     lp_delta: int | None = None  # None = unknown (never guessed)
     champion_icon_url: str | None = None
@@ -88,14 +98,20 @@ def signed(value: int) -> str:
     return f"{value:+d}"
 
 
-def laning_text(laning: Laning, role: str | None) -> str:
-    parts = []
-    if role in LANE_ROLES:
-        parts.append(f"**CS** {signed(laning.cs_diff)}")
-    parts += [f"**Ouro** {signed(laning.gold_diff)}", f"**XP** {signed(laning.xp_diff)}"]
+LANING_SEPARATOR = " | "
+
+
+def laning_text(laning: Laning) -> str:
+    """`**CS** -1 | **Gold** +146 | **XP** +380 | **Nível 2 primeiro** ❌`: every stat is a bold
+    label and its value, with no colon on any of them; the yes/no one is a ✅ or a ❌."""
+    parts = [
+        f"**CS** {signed(laning.cs_diff)}",
+        f"**Gold** {signed(laning.gold_diff)}",
+        f"**XP** {signed(laning.xp_diff)}",
+    ]
     if laning.first_lvl2 is not None:
-        parts.append(f"**Primeiro nível 2:** {'Sim' if laning.first_lvl2 else 'Não'}")
-    return " · ".join(parts)
+        parts.append(f"**Nível 2 primeiro** {'✅' if laning.first_lvl2 else '❌'}")
+    return LANING_SEPARATOR.join(parts)
 
 
 def stat_fields(game: RankedGame) -> list[tuple[str, str]]:
@@ -122,7 +138,7 @@ def stat_fields(game: RankedGame) -> list[tuple[str, str]]:
         per_min = f" ({game.vision_score / minutes:.2f}/min)" if minutes else ""
         fields.append(("Visão", f"{game.vision_score}{per_min}"))
     if game.gold is not None:
-        fields.append(("Ouro", format_count(game.gold)))
+        fields.append(("Gold", format_count(game.gold)))
     if game.pings is not None:
         fields.append(("Pings", str(game.pings)))
     return fields
@@ -161,9 +177,14 @@ def build_card_embed(
         embed.set_thumbnail(url=card.champion_icon_url)
     for name, value in stat_fields(game):
         embed.add_field(name=name, value=value, inline=True)
+    while len(embed.fields) % COLUMNS:
+        embed.add_field(name=BLANK, value=BLANK, inline=True)
     if card.laning is not None:
-        name = f"Stats @ 15 (vs {card.opponent_name})" if card.opponent_name else "Stats @ 15"
-        embed.add_field(name=name, value=laning_text(card.laning, role), inline=False)
-    # The numeric id only: everybody here plays on the same region.
-    embed.set_footer(text=f"Solo/Duo · {game.match_id.rsplit('_', 1)[-1]}")
+        name = discord.utils.escape_markdown(card.opponent_name or "")
+        opponent = f"{card.opponent_icon} {name}".strip()
+        title = f"Stats @ 15 (vs {opponent})" if opponent else "Stats @ 15"
+        embed.add_field(
+            name=DIVIDER, value=f"**{title}**\n{laning_text(card.laning)}", inline=False
+        )
+    embed.set_footer(text="Solo/Duo")
     return embed

@@ -494,6 +494,7 @@ class Riot(commands.Cog):
         game = source.game
         ids = [c for c in (game.champion, game.opponent_champion) if c]
         names = await self.champions.names(ids) if self.champions else {}
+        emojis = await self.champions.icon_markup(ids) if self.champions else {}
         champion = game.champion or "?"
         opponent = game.opponent_champion
         icon = (
@@ -506,6 +507,7 @@ class Riot(commands.Cog):
             champion_name=names.get(champion, champion),
             laning=source.laning,
             opponent_name=names.get(opponent, opponent) if opponent else None,
+            opponent_icon=emojis.get(opponent, "") if opponent else "",
             rank=source.rank,
             lp_delta=None,  # only known for games the feed saw live
             champion_icon_url=icon,
