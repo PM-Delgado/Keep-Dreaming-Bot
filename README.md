@@ -5,7 +5,7 @@
 
 <p align="center">
   <b>The Discord bot of the Keep Dreaming community.</b><br>
-  The name of the day, League of Legends scrims with balanced teams and ratings, and whatever the server asks for next.
+  The name of the day, League of Legends scrims with balanced teams and ratings, a Solo/Duo leaderboard with automatic game cards, and whatever the server asks for next.
 </p>
 
 <p align="center">
@@ -20,6 +20,7 @@
 
 <p align="center">
   <a href="#-what-it-does-today">What it does</a> ·
+  <a href="#-riot-integration">Riot integration</a> ·
   <a href="#-how-scrims-work">How Scrims work</a> ·
   <a href="#-run-your-own-copy">Run your own copy</a> ·
   <a href="#-commands">Commands</a> ·
@@ -36,12 +37,14 @@ wanted so far. It runs 24/7 on [Railway](https://railway.com) as a single worker
 straight from the `main` branch of this repository (a merge that changes the bot's code or dependencies
 redeploys it), with its SQLite database on a persistent volume.
 
-It started as a "name of the day" joke and has grown one feature at a time. It currently does two things,
+It started as a "name of the day" joke and has grown one feature at a time. It currently does three things,
 and gets more as the server asks for them:
 
 - **Name of the day**, the original joke.
 - **Scrims**, the server's League of Legends in-house games: lobbies, balanced teams, results, ratings
   and stats.
+- **Riot integration**, optional: the daily Solo/Duo leaderboard of the server's players and a card with
+  the LP gained or lost after every ranked game they play.
 
 The code is open so anyone can read it, learn from it or fork it. Running your own copy is possible (see
 [below](#-run-your-own-copy)) but it is not the goal, and the server's choices are built in: **the bot's
@@ -65,8 +68,39 @@ and the docs are in English.
   role icons show up in lobbies, matches and profiles.
 - **History, stats and leaderboards.** `/history`, `/stats` and `/leaderboard` read the confirmed games.
   Raw ratings are never shown to players.
-- **Optional Riot integration.** Link a League account to seed the rating from the Solo/Duo rank, estimate
-  role experience and show recent ranked games.
+The Scrims also use the [Riot integration](#-riot-integration) below: a linked account seeds the rating
+from the player's Solo/Duo rank and gives an estimate of their role experience.
+
+### 📊 Riot integration
+
+Optional: it needs a Riot API key, and without one this whole section is off while the rest of the bot
+works the same. Players link one or more League accounts with `/riot link` (the first is the main
+account), and from then on the bot follows them by itself.
+
+<!-- TODO screenshot: the daily leaderboard -->
+
+- **Daily Solo/Duo leaderboard.** Every day at 10:00 (Lisbon time) the bot posts the real Solo/Duo rank
+  of every player's main account in a channel of the server: medals for the top three, a tier emblem and
+  the LP of each player, how many LP they gained or lost since the day before, and the day's biggest
+  climb and fall. Ten players per page with ◀ ▶ buttons, and `/riot leaderboard` shows it at any time.
+
+<!-- TODO screenshot: a post-game card -->
+
+- **A card after every ranked game.** A few minutes after any linked account finishes a ranked Solo/Duo
+  game, the bot posts a card in the same channel: win or loss, the champion, the rank with the **LP
+  gained or lost** next to it, KDA, CS, damage and its share of the team's, vision, gold, pings and the
+  best multikill. A **Stats @ 15** line adds the CS, gold and XP difference to the lane opponent at
+  15 minutes and who reached level 2 first. Every linked account counts, not only the main one, and the
+  LP change is left out rather than guessed when it cannot be told (several games finished at once, or
+  Riot has not updated the rank yet).
+- **Ranked history.** `/riot history` lists a player's recent ranked games, two rows each, with the LP
+  change for the games the bot saw live. `/riot list` shows the linked accounts and `/riot main` changes
+  the main one.
+- **Kept up to date by itself.** Ranks and games refresh when a profile is opened, when a ready-check
+  starts and on a timer, so nobody has to run `/riot refresh`.
+
+Custom games are never requested from Riot. What is requested and stored, and that `/riot unlink` deletes
+it, is in [docs/riot-data.md](docs/riot-data.md).
 
 ### 📅 Name of the day
 
@@ -141,7 +175,7 @@ or private and what it answers, is in [docs/commands.md](docs/commands.md).
 |---|---|
 | **Players** | `/register`, `/profile view\|roles\|rank`, `/history`, `/stats`, `/leaderboard` |
 | **Lobbies and games** | `/lobby open\|schedule\|list\|show\|cancel`, `/match show\|stats`; *admin:* `/match void\|fix\|set\|validate\|pending` |
-| **Riot accounts** (optional) | `/riot link\|main\|unlink\|list\|history\|refresh` |
+| **Riot** (optional) | `/riot link\|main\|unlink\|list\|history\|leaderboard\|refresh`; *admin:* `/riot card` (previews a game card) |
 | **Admin** | `/admin player register`, `/admin rating inspect\|set\|rank\|recompute`, `/admin roles set`, `/sync` |
 | **Testing** (`ENABLE_MOCK_PLAYERS`) | `/mock create\|fill\|ready\|drop\|report\|confirm\|stats\|list\|clear` |
 | **Name of the day** | `/goomah`, `/goomahdor` |
@@ -222,10 +256,12 @@ the [roster tool](docs/roster-tool.md) and the [Riot data notes](docs/riot-data.
 
 ## 🧭 Roadmap
 
-Scrims, so far. Other features are added as the Keep Dreaming community asks for them.
+Scrims and the Riot integration, so far. Other features are added as the Keep Dreaming community asks for
+them.
 
 - [x] Roster, role proficiency, hidden rating and visible in-house rank
 - [x] Optional Riot account linking, rank and ranked history
+- [x] Daily Solo/Duo leaderboard and an automatic card with the LP change after every ranked game
 - [x] Lobbies, ready-check, scheduled lobbies and role-aware balanced teams
 - [x] Result reporting, confirmation, corrections, ratings from games
 - [x] Simulator and tuning lab
@@ -244,8 +280,9 @@ for the team ratings. Champion data and icons come from Riot's Data Dragon, and 
 Keep-Dreaming-Bot isn't endorsed by Riot Games and doesn't reflect the views or opinions of Riot Games or
 anyone officially involved in producing or managing Riot Games properties. Riot Games, and all associated
 properties are trademarks or registered trademarks of Riot Games, Inc. The in-house ranks are internal to
-the group and are not League of Legends ranks. See [docs/riot-data.md](docs/riot-data.md) for how Riot data
-is used.
+the group and are not League of Legends ranks; the Solo/Duo leaderboard and the game cards show the ranks
+and games that Riot's API returns for the accounts players link. See [docs/riot-data.md](docs/riot-data.md)
+for how Riot data is used.
 
 ## 📝 License
 
