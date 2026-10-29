@@ -8,7 +8,7 @@ from typing import Any
 
 from bot.db import Database
 from bot.features.ratings.repository import from_db, to_db
-from bot.features.riot.client import RankedGame
+from bot.features.riot.client import RankedGame, SoloRank
 from bot.features.riot.leaderboard import MainRank
 from bot.features.riot.roles import GameObservation
 
@@ -29,10 +29,42 @@ class AccountRow:
     history_synced_at: datetime | None
     linked_by: int
     linked_at: datetime
+    # The post-game feed (see migrations 12 and 14).
+    feed_since: datetime | None = None  # when the feed started watching the account
+    feed_enabled: bool = True
+    feed_tier: str | None = None
+    feed_division: str | None = None
+    feed_lp: int | None = None
 
     @property
     def riot_id(self) -> str:
         return f"{self.game_name}#{self.tag_line}"
+
+    @property
+    def feed_rank(self) -> SoloRank | None:
+        """The rank after the last game the feed handled; None = unranked or not looked up."""
+        if self.feed_tier is None:
+            return None
+        return SoloRank(self.feed_tier, self.feed_division, self.feed_lp or 0)
+
+
+@dataclass(frozen=True)
+class FeedAccount:
+    """An account the feed watches, with who it belongs to (for the avatar and the name)."""
+
+    account: AccountRow
+    discord_id: int
+    nickname: str
+
+
+@dataclass(frozen=True)
+class PendingGame:
+    """A stored ranked game the feed has not handled yet."""
+
+    match_id: str
+    played_at: datetime
+    duration_s: int
+    early_surrender: bool
 
 
 @dataclass(frozen=True)
@@ -56,11 +88,12 @@ class StoredGame:
     gold: int | None
     vision_score: int | None
     is_main: bool = False  # played on the player's main account
+    lp_delta: int | None = None  # LP the game changed, only for games the feed saw live
 
 
 _COLUMNS = (
     "id, player_id, puuid, game_name, tag_line, platform, is_main, history_synced_at,"
-    " linked_by, linked_at"
+    " linked_by, linked_at, feed_since, feed_enabled, feed_tier, feed_division, feed_lp"
 )
 
 
@@ -76,6 +109,11 @@ def _account(r: Sequence[Any]) -> AccountRow:
         from_db(r[7]) if r[7] else None,
         r[8],
         from_db(r[9]),
+        from_db(r[10]) if r[10] else None,
+        bool(r[11]),
+        r[12],
+        r[13],
+        r[14],
     )
 
 
@@ -247,7 +285,7 @@ class RiotRepository:
             "SELECT g.riot_match_id, a.game_name, a.tag_line, g.played_at, g.team_position,"
             " g.individual_position, g.win, g.kills, g.deaths, g.assists, g.duration_s,"
             " g.early_surrender, g.champion, g.cs, g.damage, g.gold, g.vision_score,"
-            " a.is_main"
+            " a.is_main, g.lp_delta"
             " FROM riot_role_games g JOIN riot_accounts a ON a.id = g.riot_account_id"
             " WHERE a.player_id = ?"
         )
@@ -278,6 +316,7 @@ class RiotRepository:
                 gold=r[15],
                 vision_score=r[16],
                 is_main=bool(r[17]),
+                lp_delta=r[18],
             )
             for r in rows
         ]
@@ -386,3 +425,79 @@ class RiotRepository:
             (day,),
         ) as cur:
             return [(r[0], r[1], r[2], r[3]) for r in await cur.fetchall()]
+
+    # --- post-game feed ----------------------------------------------------------------------
+
+    async def feed_accounts(self) -> list[FeedAccount]:
+        """Every account the feed watches: of real players still in the group, switched on."""
+        columns = ", ".join(f"a.{c.strip()}" for c in _COLUMNS.split(","))
+        async with self.db.conn.execute(
+            f"SELECT {columns}, p.discord_id, p.nickname FROM riot_accounts a"
+            " JOIN players p ON p.id = a.player_id"
+            " WHERE p.is_mock = 0 AND p.left_at IS NULL AND a.feed_enabled = 1 ORDER BY a.id"
+        ) as cur:
+            return [FeedAccount(_account(r), r[-2], r[-1]) for r in await cur.fetchall()]
+
+    async def start_feed(self, account_id: int, since: datetime, rank: SoloRank | None) -> None:
+        """Begin watching an account: games that ended before `since` are never announced."""
+        await self.db.conn.execute(
+            "UPDATE riot_accounts SET feed_since = ?, feed_tier = ?, feed_division = ?,"
+            " feed_lp = ? WHERE id = ?",
+            (
+                to_db(since),
+                rank.tier if rank else None,
+                rank.division if rank else None,
+                rank.lp if rank else None,
+                account_id,
+            ),
+        )
+        await self.db.conn.commit()
+
+    async def set_feed_rank(self, account_id: int, rank: SoloRank | None) -> None:
+        await self.db.conn.execute(
+            "UPDATE riot_accounts SET feed_tier = ?, feed_division = ?, feed_lp = ? WHERE id = ?",
+            (
+                rank.tier if rank else None,
+                rank.division if rank else None,
+                rank.lp if rank else None,
+                account_id,
+            ),
+        )
+        await self.db.conn.commit()
+
+    async def pending_games(self, account_id: int, since: datetime) -> list[PendingGame]:
+        """Games stored for the account that ended after the feed started and are not handled."""
+        async with self.db.conn.execute(
+            "SELECT riot_match_id, played_at, duration_s, early_surrender FROM riot_role_games"
+            " WHERE riot_account_id = ? AND announced_at IS NULL AND played_at >= ?"
+            " ORDER BY played_at, riot_match_id",
+            (account_id, to_db(since)),
+        ) as cur:
+            return [
+                PendingGame(r[0], from_db(r[1]), r[2], bool(r[3])) for r in await cur.fetchall()
+            ]
+
+    async def mark_announced(
+        self,
+        account_id: int,
+        match_id: str,
+        when: datetime,
+        lp_delta: int | None = None,
+        rank: SoloRank | None = None,
+    ) -> None:
+        """The feed is done with the game (posted, or deliberately not): never look at it again.
+        `lp_delta` and `rank` (the rank after it) are kept for /riot history."""
+        await self.db.conn.execute(
+            "UPDATE riot_role_games SET announced_at = ?, lp_delta = ?, rank_tier = ?,"
+            " rank_division = ?, rank_lp = ? WHERE riot_account_id = ? AND riot_match_id = ?",
+            (
+                to_db(when),
+                lp_delta,
+                rank.tier if rank else None,
+                rank.division if rank else None,
+                rank.lp if rank else None,
+                account_id,
+                match_id,
+            ),
+        )
+        await self.db.conn.commit()

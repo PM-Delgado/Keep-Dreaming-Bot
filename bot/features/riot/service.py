@@ -7,7 +7,7 @@ clear message, while everything already stored (and every manual alternative) ke
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Coroutine, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -24,10 +24,11 @@ from bot.features.riot.client import (
     SoloRank,
 )
 from bot.features.riot.leaderboard import LISBON, Row, build_rows
-from bot.features.riot.lp import ladder_points
+from bot.features.riot.lp import ladder_points, lp_delta
 from bot.features.riot.platforms import normalise_platform
 from bot.features.riot.repository import (
     AccountRow,
+    FeedAccount,
     PuuidAlreadyLinked,
     RiotRepository,
     StoredGame,
@@ -49,6 +50,9 @@ HISTORY_VIEW_MAX_AGE = timedelta(minutes=5)  # /riot history asks Riot for new g
 SAME_RANK_STORED_EVERY = timedelta(days=1)  # an unchanged rank is saved again at most this often
 LEADERBOARD_MAX_AGE = timedelta(hours=1)  # /riot leaderboard looks the mains' ranks up after this
 LEADERBOARD_WAIT_S = 10.0  # ... and waits this long for Riot, then shows the saved ranks
+# The post-game feed (`poll_new_games`).
+FEED_MAX_AGE = timedelta(hours=2)  # a game that ended longer ago is never announced
+FEED_RANK_LAG = timedelta(minutes=10)  # how long to wait for Riot's rank to reflect a new game
 
 CONSENT_NOTICE = (
     "**Dados da Riot: o que acontece**\n"
@@ -127,6 +131,30 @@ class CardSource:
 
 
 @dataclass(frozen=True)
+class FeedItem:
+    """One game ready to be posted: whose it is, the card data, the LP it changed (if known)."""
+
+    discord_id: int
+    source: CardSource
+    lp_delta: int | None
+
+
+# Posts one game; True if it was posted. A False leaves the game waiting for the next cycle.
+Announce = Callable[[FeedItem], Awaitable[bool]]
+
+
+@dataclass
+class PollSummary:
+    watched: int = 0  # accounts looked at
+    started: int = 0  # accounts the feed began watching (nothing announced for them yet)
+    posted: int = 0
+    skipped: int = 0  # handled without a post: remakes, games too old, games Riot dropped
+    failed: int = 0  # accounts that hit an error (retried next cycle)
+    waiting: int = 0  # accounts whose new game is waiting for Riot to update the rank
+    stopped: str = ""  # why the whole cycle stopped early (rejected key, rate limit)
+
+
+@dataclass(frozen=True)
 class UnlinkResult:
     removed: AccountRow
     new_main: AccountRow | None  # set when the removed account was the main and others remain
@@ -172,6 +200,7 @@ class RiotService:
         self._inflight: dict[int, asyncio.Task[None]] = {}  # automatic refresh running per player
         self._syncing: set[int] = set()
         self._tasks: set[asyncio.Task[None]] = set()
+        self._polling = asyncio.Lock()  # one feed cycle at a time
 
     @property
     def enabled(self) -> bool:
@@ -330,24 +359,144 @@ class RiotService:
             raise PlayerError("Não há jogos ranked Solo/Duo guardados para mostrar.")
         newest = stored[0]
         account = next(a for a in accounts if a.riot_id == newest.riot_id)
-        try:
-            game = await client.ranked_game(
-                newest.match_id, account.puuid, account.platform, background=False
-            )
-        except RiotError as exc:
-            raise user_error(exc) from exc
-        if game is None:
-            raise PlayerError("A Riot já não devolve esse jogo.")
-        laning = rank = None
-        try:
-            laning = await client.laning(game, newest.match_id, account.platform, background=False)
-        except RiotError as exc:
-            log.info("Card: no 15 minute numbers for %s: %s", newest.match_id, type(exc).__name__)
+        rank = None
         try:
             rank = await client.solo_rank(account.puuid, account.platform, background=False)
         except RiotError as exc:
             log.info("Card: no rank for account %s: %s", account.id, type(exc).__name__)
-        return CardSource(player.nickname, account.riot_id, game, laning, rank)
+        try:
+            source = await self._card_source(
+                player.nickname, account, newest.match_id, rank, background=False
+            )
+        except RiotError as exc:
+            raise user_error(exc) from exc
+        if source is None:
+            raise PlayerError("A Riot já não devolve esse jogo.")
+        return source
+
+    async def _card_source(
+        self,
+        nickname: str,
+        account: AccountRow,
+        match_id: str,
+        rank: SoloRank | None,
+        background: bool,
+    ) -> CardSource | None:
+        """Everything the card shows for one game: the match and the 15:00 numbers (best effort:
+        a failed timeline only leaves that block out). None if Riot no longer has the match or it
+        is not a ranked Solo/Duo game; other Riot errors are raised."""
+        client = self._client()
+        try:
+            game = await client.ranked_game(
+                match_id, account.puuid, account.platform, background=background
+            )
+        except RiotNotFound:
+            return None
+        if game is None:
+            return None
+        laning = None
+        try:
+            laning = await client.laning(game, match_id, account.platform, background=background)
+        except (RiotAuthError, RiotRateLimited):
+            raise
+        except RiotError as exc:
+            log.info("Card: no 15 minute numbers for %s: %s", match_id, type(exc).__name__)
+        return CardSource(nickname, account.riot_id, game, laning, rank)
+
+    # --- post-game feed ---------------------------------------------------------------------
+
+    async def poll_new_games(self, announce: Announce) -> PollSummary:
+        """One cycle of the feed: look at every watched account for new ranked games and post a
+        card for each through `announce`. Background work; never raises. Stops at the first sign
+        that going on would only fail (a rejected key or a rate limit); any other trouble only
+        skips that account until the next cycle."""
+        summary = PollSummary()
+        if self.client is None or self._polling.locked():
+            return summary
+        async with self._polling:
+            accounts = await self.repo.feed_accounts()
+            summary.watched = len(accounts)
+            for watched in accounts:
+                try:
+                    await self._poll_account(watched, announce, summary)
+                except (RiotError, PlayerError) as exc:
+                    cause = exc.__cause__ if isinstance(exc, PlayerError) else exc
+                    if isinstance(cause, RiotAuthError | RiotRateLimited):
+                        summary.stopped = type(cause).__name__
+                        break
+                    summary.failed += 1
+                    log.warning("Feed: account %s failed: %s", watched.account.id, exc)
+                except Exception:
+                    summary.failed += 1
+                    log.exception("Feed: account %s crashed", watched.account.id)
+        if summary.stopped:
+            log.warning("Feed cycle stopped early: %s", summary.stopped)
+        return summary
+
+    async def _poll_account(
+        self, watched: FeedAccount, announce: Announce, summary: PollSummary
+    ) -> None:
+        client = self._client()
+        account, now = watched.account, self.clock()
+        if account.feed_since is None:
+            # First time: only remember the rank. Games that ended before now are never posted.
+            rank = await client.solo_rank(account.puuid, account.platform, background=True)
+            await self.repo.start_feed(account.id, now, rank)
+            summary.started += 1
+            return
+        await self.sync_history(account)  # stores the new games, 1 request when there are none
+        pending = await self.repo.pending_games(account.id, account.feed_since)
+        if not pending:
+            return
+        # Remakes and games that ended long ago are marked as handled without a post.
+        too_short = self.history.min_duration_s
+        skip = [
+            g
+            for g in pending
+            if g.early_surrender or g.duration_s < too_short or now - g.played_at > FEED_MAX_AGE
+        ]
+        live = [g for g in pending if g not in skip]
+        rank = await client.solo_rank(account.puuid, account.platform, background=True)
+        before = account.feed_rank
+        if (
+            len(live) == 1
+            and rank is not None
+            and rank == before
+            and now - live[0].played_at < FEED_RANK_LAG
+        ):
+            summary.waiting += 1  # Riot has probably not updated the rank yet: look again later
+            return
+        # The LP of a game is only known when it is the only one since the last look; with
+        # several at once the number would be a sum, so none is shown.
+        delta = lp_delta(before, rank) if len(live) == 1 else None
+        for game in skip:
+            await self.repo.mark_announced(account.id, game.match_id, now)
+            summary.skipped += 1
+        for index, game in enumerate(live):
+            last = index == len(live) - 1
+            # Only the newest game can say which rank the player has now.
+            shown_rank = rank if last else None
+            source = await self._card_source(
+                watched.nickname, account, game.match_id, shown_rank, background=True
+            )
+            if source is None:
+                await self.repo.mark_announced(account.id, game.match_id, now)
+                summary.skipped += 1
+                continue
+            if not await announce(FeedItem(watched.discord_id, source, delta)):
+                summary.failed += 1
+                return  # stays pending, and the baseline stays too: next cycle posts it
+            await self.repo.mark_announced(account.id, game.match_id, now, delta, shown_rank)
+            summary.posted += 1
+        await self.repo.set_feed_rank(account.id, rank)
+        if account.is_main:  # the leaderboard reads this one: it is as fresh as it gets
+            await self.repo.set_rank(
+                account.id,
+                rank.tier if rank else None,
+                rank.division if rank else None,
+                rank.lp if rank else None,
+                now,
+            )
 
     async def main_puuid_of(self, player_id: int) -> str | None:
         return await self.repo.main_puuid(player_id)
