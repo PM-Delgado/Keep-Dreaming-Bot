@@ -341,6 +341,21 @@ MIGRATIONS: list[str] = [
         emoji_name TEXT NOT NULL
     );
     """,
+    # 14: the post-game feed. `feed_*` is the Solo/Duo rank after the last game the feed handled
+    # for the account (tier NULL = unranked or never looked up): the LP change of the next game is
+    # measured against it, and only the feed writes it (the leaderboard has its own `rank_*`).
+    # A stored game with `announced_at` NULL and `played_at` >= `feed_since` is waiting to be
+    # posted; `lp_delta` and `rank_*` are filled in when it is. Unlinking deletes it all.
+    """
+    ALTER TABLE riot_accounts ADD COLUMN feed_tier TEXT;
+    ALTER TABLE riot_accounts ADD COLUMN feed_division TEXT;
+    ALTER TABLE riot_accounts ADD COLUMN feed_lp INTEGER;
+    ALTER TABLE riot_role_games ADD COLUMN announced_at TEXT;
+    ALTER TABLE riot_role_games ADD COLUMN lp_delta INTEGER;
+    ALTER TABLE riot_role_games ADD COLUMN rank_tier TEXT;
+    ALTER TABLE riot_role_games ADD COLUMN rank_division TEXT;
+    ALTER TABLE riot_role_games ADD COLUMN rank_lp INTEGER;
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

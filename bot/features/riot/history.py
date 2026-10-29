@@ -34,6 +34,7 @@ class HistoryEntry:
     gold: int | None
     vision_score: int | None
     is_main: bool = False
+    lp_delta: int | None = None  # None (or 0) = unknown: only games the feed saw live have it
 
     @property
     def kda(self) -> float:
@@ -74,6 +75,7 @@ def to_entry(game: StoredGame) -> HistoryEntry:
         gold=game.gold,
         vision_score=game.vision_score,
         is_main=game.is_main,
+        lp_delta=game.lp_delta,
     )
 
 
@@ -134,7 +136,10 @@ def format_line(
     if entry.cs is not None:
         per_min = entry.cs_per_min
         parts.append(f"{entry.cs} CS" + (f" ({per_min:.1f}/min)" if per_min is not None else ""))
-    parts += [format_duration(entry.duration_s), format_ago(entry.played_at, now)]
+    parts.append(format_duration(entry.duration_s))
+    if entry.lp_delta and entry.result != "remake":
+        parts.append(f"{entry.lp_delta:+d} LP")
+    parts.append(format_ago(entry.played_at, now))
     line = " · ".join(parts)
     if entry.is_main:
         line = f"★ {line}"
