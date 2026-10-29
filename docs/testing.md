@@ -23,7 +23,7 @@ In `.env` (git-ignored):
 ```
 ADMIN_USER_IDS=<your Discord user id>
 ENABLE_MOCK_PLAYERS=true
-READY_CHECK_SECONDS=30        # shorter than the default 120, so timeouts are quick to test
+READY_CHECK_SECONDS=30        # shorter than the default 900, so timeouts are quick to test
 ```
 
 Restart the bot. You should see a log line saying mock players are enabled. **Turn

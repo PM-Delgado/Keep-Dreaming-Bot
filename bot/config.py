@@ -26,7 +26,7 @@ class Settings:
     # Lobbies. Mock players are fake players for testing on a server with too few real people;
     # keep them off in production.
     mock_players: bool = False
-    ready_check_seconds: int = 120
+    ready_check_seconds: int = 900  # 15 minutes: the most READY_CHECK_SECONDS allows
     # Champion and role icons (Riot images) shown as application emojis. The name is historical:
     # it also switches the role icons. On by default; off stops uploading and showing them.
     champion_icons: bool = True
@@ -112,7 +112,7 @@ def _parse_log_dir(raw: str) -> Path | None:
 def _parse_ready_seconds(raw: str) -> int:
     raw = raw.strip()
     if not raw:
-        return 120
+        return 900
     try:
         seconds = int(raw)
     except ValueError:
