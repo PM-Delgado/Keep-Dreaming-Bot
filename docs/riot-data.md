@@ -24,6 +24,7 @@ Per linked account (`/riot link Name#TAG`):
 | summoner-v4 by-puuid | check the account has a League profile on the chosen platform |
 | league-v4 entries by-puuid | the main account's Solo/Duo rank: the starting rating and the rank-based estimate used by matchmaking |
 | match-v5 ids + match (queue 420, ranked Solo/Duo only) | role experience: which roles the player has recently played |
+| match-v5 timeline | only for `/riot card` (the post-game card preview): gold, XP and CS difference to the lane opponent at 15:00 and who reached level 2 first. Fetched when the card is built, **not stored** |
 
 Custom games are never requested from Riot. In-house results and KDA are entered manually.
 

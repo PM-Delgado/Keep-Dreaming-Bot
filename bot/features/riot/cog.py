@@ -21,6 +21,7 @@ from bot.features.icons.tiers import TierIconService
 from bot.features.players.service import PlayerError
 from bot.features.players.text import tier_color
 from bot.features.ratings.service import RatingError
+from bot.features.riot.card import CardData, build_card_embed
 from bot.features.riot.client import RiotClient
 from bot.features.riot.history import format_ago, format_line, format_summary, summarize, to_entry
 from bot.features.riot.leaderboard import LISBON
@@ -132,6 +133,7 @@ def build_history_embed(
 REFRESH_HOURS = 6  # the timer that refreshes every linked account (a restart does not run it)
 LEADERBOARD_TIME = dt.time(hour=10, minute=0, tzinfo=LISBON)  # the daily leaderboard post
 NOT_ADMIN_POST = "Só admins podem publicar o leaderboard no canal."
+NOT_ADMIN_CARD = "Só admins podem pré-visualizar cartões de jogo."
 NO_FEED_CHANNEL = (
     "Não há canal do feed: define `RIOT_FEED_CHANNEL_ID` (e confirma que o bot lá pode escrever)."
 )
@@ -241,10 +243,9 @@ class Riot(commands.Cog):
         """Look up the mains' ranks and post the leaderboard in the feed channel. `snapshot`
         (the daily post) also records the day's ranks, which tomorrow's LP trend is measured
         against. False when there is no usable channel; Riot problems only mean older ranks."""
-        channel_id = self.bot.settings.riot_feed_channel_id
-        channel = self.bot.get_channel(channel_id) if channel_id is not None else None
-        if not isinstance(channel, discord.abc.Messageable):
-            log.warning("Riot feed channel %s not found: leaderboard not posted.", channel_id)
+        channel = self._feed_channel()
+        if channel is None:
+            log.warning("Riot feed channel not found: leaderboard not posted.")
             return False
         await self.service.refresh_main_ranks()
         if snapshot:
@@ -254,8 +255,14 @@ class Riot(commands.Cog):
         except discord.HTTPException as exc:
             log.warning("Could not post the leaderboard: %s", exc.status)
             return False
-        log.info("Posted the Solo/Duo leaderboard in channel %s", channel_id)
+        log.info("Posted the Solo/Duo leaderboard in the feed channel")
         return True
+
+    def _feed_channel(self) -> discord.abc.Messageable | None:
+        """The channel of the leaderboard and the game cards, None when unset or not visible."""
+        channel_id = self.bot.settings.riot_feed_channel_id
+        channel = self.bot.get_channel(channel_id) if channel_id is not None else None
+        return channel if isinstance(channel, discord.abc.Messageable) else None
 
     async def _color(self, player_id: int) -> discord.Color:
         """The side bar has the colour of the player's League Solo/Duo tier, as on the profile."""
@@ -480,6 +487,74 @@ class Riot(commands.Cog):
             "📨 Leaderboard publicado no canal do feed." if posted else NO_FEED_CHANNEL,
             ephemeral=True,
         )
+
+    async def build_card(self, target: discord.abc.User, riot_id: str | None) -> discord.Embed:
+        """The post-game card of `target`'s newest stored game (see `RiotService.game_card`)."""
+        source = await self.service.game_card(target.id, riot_id)
+        game = source.game
+        ids = [c for c in (game.champion, game.opponent_champion) if c]
+        names = await self.champions.names(ids) if self.champions else {}
+        champion = game.champion or "?"
+        opponent = game.opponent_champion
+        icon = (
+            await self.champions.icon_link(champion) if self.champions and game.champion else None
+        )
+        card = CardData(
+            nickname=source.nickname,
+            riot_id=source.riot_id,
+            game=game,
+            champion_name=names.get(champion, champion),
+            laning=source.laning,
+            opponent_name=names.get(opponent, opponent) if opponent else None,
+            rank=source.rank,
+            lp_delta=None,  # only known for games the feed saw live
+            champion_icon_url=icon,
+            avatar_url=target.display_avatar.url,
+        )
+        return build_card_embed(
+            card,
+            self.icons.markup() if self.icons else None,
+            self.tiers.markup() if self.tiers else None,
+        )
+
+    @riot.command(name="card", description="Pré-visualiza o cartão do último jogo (admins).")
+    @app_commands.describe(
+        player="O jogador (por defeito, tu).",
+        riot_id="Só os jogos desta conta (por defeito, todas as contas).",
+        post="Publicar também no canal do feed.",
+    )
+    @app_commands.autocomplete(riot_id=_history_autocomplete)
+    async def card(
+        self,
+        interaction: discord.Interaction,
+        player: discord.Member | None = None,
+        riot_id: str | None = None,
+        post: bool = False,
+    ) -> None:
+        if not is_admin(self.bot.settings, interaction.user.id):
+            await interaction.response.send_message(NOT_ADMIN_CARD, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            embed = await self.build_card(player or interaction.user, riot_id)
+        except (PlayerError, RatingError) as exc:
+            log_refusal(interaction, exc)
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        if not post:
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        channel = self._feed_channel()
+        if channel is None:
+            await interaction.followup.send(NO_FEED_CHANNEL, ephemeral=True)
+            return
+        try:
+            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as exc:
+            log.warning("Could not post the card: %s", exc.status)
+            await interaction.followup.send("Não consegui publicar no canal.", ephemeral=True)
+            return
+        await interaction.followup.send("📨 Cartão publicado no canal do feed.", ephemeral=True)
 
     @riot.command(name="refresh", description="Atualiza nomes, rank e histórico ranked.")
     @app_commands.describe(player="Só admins.")

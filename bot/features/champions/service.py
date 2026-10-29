@@ -106,6 +106,12 @@ class ChampionService:
     async def names(self, ids: list[str]) -> dict[str, str]:
         return await self.repo.names(ids)
 
+    async def icon_link(self, champion_id: str) -> str | None:
+        """The champion's square icon on Data Dragon (for embed thumbnails), None before the
+        champion list is cached."""
+        patch = await self.repo.current_patch()
+        return icon_url(patch, champion_id) if patch else None
+
     # --- icons (application emojis) ----
 
     async def icon_markup(self, ids: list[str]) -> dict[str, str]:

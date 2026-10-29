@@ -159,6 +159,30 @@ class RankedGame:
     damage: int | None = None  # damage dealt to champions
     gold: int | None = None
     vision_score: int | None = None
+    # For the post-game card. None when Riot did not send them (or the game predates the field).
+    pings: int | None = None  # all the *Pings fields added up
+    team_kills: int | None = None
+    team_damage: int | None = None  # damage to champions, whole team
+    double_kills: int | None = None
+    triple_kills: int | None = None
+    quadra_kills: int | None = None
+    penta_kills: int | None = None
+    participant_id: int | None = None
+    opponent_participant_id: int | None = None  # same position, other team
+    opponent_champion: str | None = None
+
+
+@dataclass(frozen=True)
+class Laning:
+    """The player's numbers at 15:00 minus those of the lane opponent (positive = ahead)."""
+
+    cs_diff: int
+    gold_diff: int
+    xp_diff: int
+    first_lvl2: bool | None  # who reached level 2 first; None when it can't be told
+
+
+LANING_AT_MS = 15 * 60 * 1000
 
 
 class RiotClient:
@@ -288,6 +312,20 @@ class RiotClient:
         data = await self._get(match_region(platform), path, background=background)
         return parse_ranked_game(data, puuid)
 
+    async def laning(
+        self, game: RankedGame, match_id: str, platform: str, background: bool = True
+    ) -> Laning | None:
+        """The 15:00 numbers against the lane opponent (one extra request: the match timeline).
+
+        None when the game has no opponent in the same position, ended before 15:00 or the
+        timeline is not as expected: the card then simply leaves the block out.
+        """
+        if game.participant_id is None or game.opponent_participant_id is None:
+            return None
+        path = f"/lol/match/v5/matches/{quote(match_id, safe='')}/timeline"
+        data = await self._get(match_region(platform), path, background=background)
+        return parse_laning(data, game.participant_id, game.opponent_participant_id)
+
 
 def _retry_after(headers: Mapping[str, str]) -> float:
     try:
@@ -331,6 +369,35 @@ def _cs(participant: Mapping[str, Any]) -> int | None:
     return (lane or 0) + (jungle or 0)
 
 
+def _pings(participant: Mapping[str, Any]) -> int | None:
+    """Every `...Pings` counter added up, as the game's ping total; None if Riot sent none."""
+    counts = [
+        v
+        for k, v in participant.items()
+        if k.endswith("Pings") and isinstance(v, int) and not isinstance(v, bool)
+    ]
+    return sum(counts) if counts else None
+
+
+def _team_total(participants: list[Any], team: Any, key: str) -> int | None:
+    """Sum of `key` over a team; None if team ids or the field are missing."""
+    if team is None:
+        return None
+    values = [_optional_int(p.get(key)) for p in participants if p.get("teamId") == team]
+    return sum(v or 0 for v in values) if values and any(v is not None for v in values) else None
+
+
+def _opponent(me: Mapping[str, Any], participants: list[Any]) -> Mapping[str, Any] | None:
+    """Whoever played the same position on the other team (None when it can't be told)."""
+    position, team = me.get("teamPosition"), me.get("teamId")
+    if not position or team is None:
+        return None
+    return next(
+        (p for p in participants if p.get("teamPosition") == position and p.get("teamId") != team),
+        None,
+    )
+
+
 def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
     try:
         info = data["info"]
@@ -341,6 +408,8 @@ def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
             return None
         stamp_ms = info.get("gameEndTimestamp") or info["gameCreation"]
         duration = int(me.get("timePlayed", info.get("gameDuration", 0)))
+        participants = info["participants"]
+        opponent = _opponent(me, participants)
         return RankedGame(
             match_id=str(data["metadata"]["matchId"]),
             played_at=datetime.fromtimestamp(int(stamp_ms) / 1000, tz=UTC),
@@ -357,6 +426,54 @@ def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
             damage=_optional_int(me.get("totalDamageDealtToChampions")),
             gold=_optional_int(me.get("goldEarned")),
             vision_score=_optional_int(me.get("visionScore")),
+            pings=_pings(me),
+            team_kills=_team_total(participants, me.get("teamId"), "kills"),
+            team_damage=_team_total(participants, me.get("teamId"), "totalDamageDealtToChampions"),
+            double_kills=_optional_int(me.get("doubleKills")),
+            triple_kills=_optional_int(me.get("tripleKills")),
+            quadra_kills=_optional_int(me.get("quadraKills")),
+            penta_kills=_optional_int(me.get("pentaKills")),
+            participant_id=_optional_int(me.get("participantId")),
+            opponent_participant_id=_optional_int(opponent.get("participantId"))
+            if opponent
+            else None,
+            opponent_champion=opponent.get("championName") if opponent else None,
         )
     except (KeyError, TypeError, ValueError, StopIteration) as exc:
         raise RiotUnavailable("unexpected match payload") from exc
+
+
+def _frame_stats(frame: Mapping[str, Any], participant_id: int) -> tuple[int, int, int]:
+    """(cs, gold, xp) of one participant in one timeline frame."""
+    stats = frame["participantFrames"][str(participant_id)]
+    cs = int(stats.get("minionsKilled", 0)) + int(stats.get("jungleMinionsKilled", 0))
+    return cs, int(stats["totalGold"]), int(stats["xp"])
+
+
+def _level_two_at(frames: list[Any], participant_id: int) -> int | None:
+    stamps = [
+        int(e["timestamp"])
+        for frame in frames
+        for e in frame.get("events", [])
+        if e.get("type") == "LEVEL_UP"
+        and e.get("participantId") == participant_id
+        and e.get("level") == 2
+    ]
+    return min(stamps) if stamps else None
+
+
+def parse_laning(timeline: Any, me: int, opponent: int) -> Laning | None:
+    """Gold, XP and CS difference at 15:00 (the first frame at or after it) and who hit level 2
+    first. None when the game ended before 15:00; raises RiotUnavailable if the shape is wrong."""
+    try:
+        frames = timeline["info"]["frames"]
+        frame = next((f for f in frames if int(f["timestamp"]) >= LANING_AT_MS), None)
+        if frame is None:
+            return None
+        my_cs, my_gold, my_xp = _frame_stats(frame, me)
+        their_cs, their_gold, their_xp = _frame_stats(frame, opponent)
+        mine, theirs = _level_two_at(frames, me), _level_two_at(frames, opponent)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RiotUnavailable("unexpected timeline payload") from exc
+    first = mine < theirs if mine is not None and theirs is not None and mine != theirs else None
+    return Laning(my_cs - their_cs, my_gold - their_gold, my_xp - their_xp, first)

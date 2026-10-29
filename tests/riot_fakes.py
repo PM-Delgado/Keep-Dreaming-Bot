@@ -34,6 +34,7 @@ class FakeRiot:
     ranks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     match_ids: dict[str, list[str]] = field(default_factory=dict)
     matches: dict[str, dict[str, Any]] = field(default_factory=dict)
+    timelines: dict[str, dict[str, Any]] = field(default_factory=dict)
     # path prefix -> forced status (e.g. "/lol/league" -> 500)
     forced: dict[str, int] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
@@ -119,6 +120,9 @@ class FakeRiot:
             return HttpResponse(200, {}, self.ranks.get(parts[-1], []))
         if path.startswith("/lol/match/v5/matches/by-puuid/") and path.endswith("/ids"):
             return HttpResponse(200, {}, list(self.match_ids.get(parts[-2], [])))
+        if path.startswith("/lol/match/v5/matches/") and path.endswith("/timeline"):
+            found = self.timelines.get(parts[-2])
+            return HttpResponse(200, {}, found) if found else HttpResponse(404, {}, None)
         if path.startswith("/lol/match/v5/matches/"):
             found = self.matches.get(parts[-1])
             return HttpResponse(200, {}, found) if found else HttpResponse(404, {}, None)

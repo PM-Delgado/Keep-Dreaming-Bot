@@ -14,6 +14,8 @@ from datetime import UTC, datetime, timedelta
 from bot.features.players.service import PlayerError, PlayerService
 from bot.features.ratings.service import RatingService
 from bot.features.riot.client import (
+    Laning,
+    RankedGame,
     RiotAuthError,
     RiotClient,
     RiotError,
@@ -111,6 +113,17 @@ class HistoryView:
     games: list[StoredGame]
     last_synced: datetime | None  # the oldest sync among the accounts shown; None = unfinished
     account: AccountRow | None  # set when one account was asked for
+
+
+@dataclass(frozen=True)
+class CardSource:
+    """What the post-game card needs from Riot for one game (fetched fresh, nothing stored)."""
+
+    nickname: str
+    riot_id: str
+    game: RankedGame
+    laning: Laning | None  # None: no opponent, under 15 minutes, or the timeline failed
+    rank: SoloRank | None  # the account's rank right now
 
 
 @dataclass(frozen=True)
@@ -296,6 +309,45 @@ class RiotService:
             last_synced=oldest_sync,
             account=chosen,
         )
+
+    async def game_card(self, discord_id: int, riot_id: str | None = None) -> CardSource:
+        """The newest stored ranked game of a player (or of one account), fetched again from
+        Riot with everything the card shows: the match, the 15:00 numbers (best effort) and the
+        account's current rank (best effort). Used to preview the card; costs up to 3 requests."""
+        client = self._client()
+        player = await self.players.require(discord_id)
+        accounts = await self.repo.list_accounts(player.id)
+        if not accounts:
+            raise PlayerError("Este jogador não tem contas ligadas.")
+        chosen: AccountRow | None = None
+        if riot_id is not None:
+            wanted = riot_id.strip().casefold()
+            chosen = next((a for a in accounts if a.riot_id.casefold() == wanted), None)
+            if chosen is None:
+                raise PlayerError("Essa conta não está ligada a este jogador.")
+        stored = await self.repo.recent_games(player.id, 1, chosen.id if chosen else None)
+        if not stored:
+            raise PlayerError("Não há jogos ranked Solo/Duo guardados para mostrar.")
+        newest = stored[0]
+        account = next(a for a in accounts if a.riot_id == newest.riot_id)
+        try:
+            game = await client.ranked_game(
+                newest.match_id, account.puuid, account.platform, background=False
+            )
+        except RiotError as exc:
+            raise user_error(exc) from exc
+        if game is None:
+            raise PlayerError("A Riot já não devolve esse jogo.")
+        laning = rank = None
+        try:
+            laning = await client.laning(game, newest.match_id, account.platform, background=False)
+        except RiotError as exc:
+            log.info("Card: no 15 minute numbers for %s: %s", newest.match_id, type(exc).__name__)
+        try:
+            rank = await client.solo_rank(account.puuid, account.platform, background=False)
+        except RiotError as exc:
+            log.info("Card: no rank for account %s: %s", account.id, type(exc).__name__)
+        return CardSource(player.nickname, account.riot_id, game, laning, rank)
 
     async def main_puuid_of(self, player_id: int) -> str | None:
         return await self.repo.main_puuid(player_id)

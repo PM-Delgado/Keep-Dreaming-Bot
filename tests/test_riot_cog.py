@@ -251,6 +251,7 @@ async def test_extension_plugs_into_the_core_and_is_removable():
             "list",
             "history",
             "leaderboard",
+            "card",
             "refresh",
         }
         for ext in EXTENSIONS:
