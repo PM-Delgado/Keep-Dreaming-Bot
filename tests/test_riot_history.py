@@ -138,14 +138,19 @@ def test_unknown_role_and_missing_stats_degrade_gracefully():
 
 def test_format_line_contains_the_requested_details():
     line = format_line(to_entry(stored()), NOW)
-    assert line.startswith("✅ **Ahri**")
-    for part in ("Mid", "7/2/9 (8.0)", "192 CS (6.2/min)", "31 min", "há 2 d"):
-        assert part in line
+    first, second = line.split("\n")  # one game, two rows
+    assert first.startswith("✅ **Ahri**")
+    for part in ("Mid", "7/2/9 (8.0)", "192 CS (6.2/min)"):  # the CS is next to the KDA
+        assert part in first
+    assert second.startswith("-# ")  # small text
+    for part in ("31 min", "há 2 d"):
+        assert part in second
+    assert "CS" not in second and "KDA" not in second
     assert "Alpha#EUW" not in line and "★" not in line  # no account name; a star only for the main
     starred = format_line(to_entry(stored(is_main=True)), NOW)
-    assert starred == f"★ {line}"  # the star goes first, so it adds almost no width
+    assert starred == f"★ {first}\n{second}"  # the star goes first, so it adds almost no width
     assert "Alpha#EUW" not in starred
-    assert "\n" not in starred  # one game, one line
+    assert starred.count("\n") == 1
     assert format_line(to_entry(stored(win=False)), NOW).startswith("❌")
     assert format_line(to_entry(stored(duration_s=200)), NOW).startswith("🔁")
 
@@ -157,7 +162,7 @@ def test_details_are_available_for_later_restyling():
     assert "24.1k dano" in detailed
     assert "12.3k ouro" in detailed
     assert "visão 25" in detailed
-    assert "\n" not in plain
+    assert plain.count("\n") == 1 and detailed.count("\n") == 2  # details are a third row
 
 
 def test_helpers():
@@ -310,9 +315,11 @@ async def test_history_command_is_public_and_shows_ten_games(stack, world, cog):
     assert embed.description.startswith("# Solo/Duo · Ana")
     assert embed.thumbnail.url == "https://cdn.invalid/a.png"
     lines = embed.description.split("\n\n")[2].split("\n")
-    assert len(lines) == 10
-    assert all("**Jinx**" in line and "ADC" in line and "8/2/6 (7.0)" in line for line in lines)
-    assert all(line.startswith("★ ") for line in lines)  # all played on the main account
+    assert len(lines) == 20  # ten games, two rows each
+    games, later = lines[0::2], lines[1::2]
+    assert all("**Jinx**" in line and "ADC" in line and "8/2/6 (7.0)" in line for line in games)
+    assert all(line.startswith("★ ") for line in games)  # all played on the main account
+    assert all(line.startswith("-# ") and "min" in line for line in later)
     assert not any("Alpha#EUW" in line for line in lines)
     assert "Jogos: 6V 4D (60%)" in embed.description
     assert embed.footer.text is None  # the sync note is a small line in the description
@@ -339,10 +346,10 @@ async def test_history_marks_the_main_accounts_games_with_a_star_and_never_names
     await stack.riot.link(1, "Beta#EUW", None, 99)
     await stack.riot.wait_for_background()
     both = build_history_embed(await stack.riot.recent_history(1), NOW)
-    lines = (both.description or "").split("\n\n")[2].split("\n")  # one line per game
-    assert len(lines) == 2
+    lines = (both.description or "").split("\n\n")[2].split("\n")  # two rows per game
+    assert len(lines) == 4
     assert lines[0].startswith("★ ")  # Alpha's game
-    assert not lines[1].startswith("★")  # Beta is not the main
+    assert not lines[2].startswith("★")  # Beta is not the main
     assert "Alpha#EUW" not in "".join(lines) and "Beta#EUW" not in "".join(lines)
     one = build_history_embed(await stack.riot.recent_history(1, riot_id="Beta#EUW"), NOW)
     assert "· Beta#EUW" in (one.description or "").splitlines()[0]  # the heading names it
@@ -410,7 +417,8 @@ def test_format_line_shows_champion_and_role_as_icons_when_both_exist():
     assert line.startswith("✅ <:champ_Ahri:1> <:role_mid:2> · 7/2/9 (8.0)")
     words = line.replace("<:champ_Ahri:1>", "").replace("<:role_mid:2>", "")
     assert "Ahri" not in words and "Mid" not in words  # no words where icons say it
-    assert "192 CS (6.2/min)" in line and "há 2 d" in line
+    first, second = line.split("\n")
+    assert "192 CS (6.2/min)" in first and "há 2 d" in second
 
 
 def test_format_line_falls_back_to_text_for_whichever_icon_is_missing():

@@ -118,8 +118,14 @@ def format_line(
     role_icon: str = "",
     champion_name: str | None = None,
 ) -> str:
-    """One game on one line: ★ if it was played on the main account, result, champion, role, KDA,
-    CS, duration, age (and optionally extra stats on a second line).
+    """One game on two rows, always, so a long line can never wrap into a third:
+
+        ★ ✅ [champion] [role] · 4/6/12 (2.7) · 198 CS (6.4/min)
+        -# 30 min · +27 LP · há 14 h
+
+    The first row has ★ (played on the main account), the result, champion, role, KDA and CS; the
+    second, in small text, the duration, the LP the game changed (only when known) and its age.
+    `details` adds a third row with extra stats.
 
     The champion and the role are shown as icons when given, else as text (`champion_name` is the
     display name; the entry only has Riot's id).
@@ -136,13 +142,14 @@ def format_line(
     if entry.cs is not None:
         per_min = entry.cs_per_min
         parts.append(f"{entry.cs} CS" + (f" ({per_min:.1f}/min)" if per_min is not None else ""))
-    parts.append(format_duration(entry.duration_s))
-    if entry.lp_delta and entry.result != "remake":
-        parts.append(f"{entry.lp_delta:+d} LP")
-    parts.append(format_ago(entry.played_at, now))
-    line = " · ".join(parts)
+    first = " · ".join(parts)
     if entry.is_main:
-        line = f"★ {line}"
+        first = f"★ {first}"
+    later = [format_duration(entry.duration_s)]
+    if entry.lp_delta and entry.result != "remake":
+        later.append(f"{entry.lp_delta:+d} LP")
+    later.append(format_ago(entry.played_at, now))
+    line = f"{first}\n-# {' · '.join(later)}"
     if details:
         extra = []
         if entry.damage is not None:
