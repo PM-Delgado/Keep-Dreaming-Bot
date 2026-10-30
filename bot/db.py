@@ -356,6 +356,19 @@ MIGRATIONS: list[str] = [
     ALTER TABLE riot_role_games ADD COLUMN rank_division TEXT;
     ALTER TABLE riot_role_games ADD COLUMN rank_lp INTEGER;
     """,
+    # 15: the short-lived messages the bot posts around a lobby (the reminder, the ready-check
+    # ping, the "please confirm" pings). Their ids are kept so they can be deleted once they are
+    # no longer needed; the lobby message and the result summary are never listed here.
+    """
+    CREATE TABLE lobby_alerts (
+        message_id INTEGER PRIMARY KEY,
+        lobby_id   INTEGER NOT NULL REFERENCES lobbies(id),
+        channel_id INTEGER NOT NULL,
+        kind       TEXT NOT NULL CHECK (kind IN ('ready', 'reminder', 'result')),
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX lobby_alerts_by_lobby ON lobby_alerts(lobby_id);
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

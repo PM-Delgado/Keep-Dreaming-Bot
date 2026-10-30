@@ -1,12 +1,11 @@
 """Lobby messages (embeds and text). All wording and layout live here so the look can be
-reworked later without touching lobby rules. Never shows ratings, only the coarse balance band."""
+reworked later without touching lobby rules. Never shows ratings or the balance of the teams."""
 
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
 
 import discord
 
-from bot.features.balance.model import BAND_CLEAR, BAND_EVEN, BAND_LOPSIDED, BAND_SLIGHT
 from bot.features.icons.roles import role_prefix
 from bot.features.lobby.repository import (
     CANCELLED,
@@ -17,7 +16,7 @@ from bot.features.lobby.repository import (
     READY_CHECK,
     TEAMS_PROPOSED,
 )
-from bot.features.lobby.service import EntryView, LobbySnapshot, ProposalView, SlotView
+from bot.features.lobby.service import EntryView, LobbySnapshot, SlotView
 from bot.features.matches.repository import PENDING, MatchRow, ParticipantRow
 from bot.features.matches.service import StandingChange, kda_text
 from bot.features.players.text import progress_bar
@@ -73,28 +72,17 @@ def reserves_text(snapshot: LobbySnapshot) -> str:
     return "\n".join(_entry_line(i, e, False) for i, e in enumerate(snapshot.reserves, start=1))
 
 
-def band_text(proposal: ProposalView) -> str:
-    side = SIDE_NAME.get(proposal.favoured or "", "")
-    return {
-        BAND_EVEN: "Equilibrado",
-        BAND_SLIGHT: f"Ligeira vantagem {side}",
-        BAND_CLEAR: f"Vantagem clara {side}",
-        BAND_LOPSIDED: f"⚠ Muito desequilibrado ({side} favorecido)",
-    }[proposal.band]
-
-
-def fit_note(slot: SlotView) -> str:
-    """Shown only when someone is not on their best role, so the line-up is easy to audit."""
-    if slot.best is None or slot.fit == slot.best:
-        return ""
-    return f" · {slot.fit if slot.fit is not None else '?'}/5"
+def game_label(snapshot: LobbySnapshot) -> str:
+    """One number for the group: the game's once it exists ("Jogo #1"), the lobby's before."""
+    if snapshot.match is not None:
+        return f"Jogo #{snapshot.match.id}"
+    return f"Scrim #{snapshot.lobby.id}"
 
 
 def team_text(slots: list[SlotView], roles: Mapping[str, str] | None = None) -> str:
     """One line per slot: the role icon (or the role's name) and the player."""
     return "\n".join(
-        f"{role_prefix(s.role, roles)}{discord.utils.escape_markdown(s.nickname)}{fit_note(s)}"
-        for s in slots
+        f"{role_prefix(s.role, roles)}{discord.utils.escape_markdown(s.nickname)}" for s in slots
     )
 
 
@@ -111,7 +99,7 @@ def build_lobby_embed(
     emoji = "📅" if scheduled_open else STATUS_EMOJI[status]
     state = "Agendado" if scheduled_open else STATUS_TEXT[status]
     embed = discord.Embed(color=STATUS_COLOR[status])
-    lines = [f"# {emoji} Scrim #{lobby.id} · {state}"]
+    lines = [f"# {emoji} {game_label(snapshot)} · {state}"]
     if lobby.note:
         embed.add_field(name="Nota", value=discord.utils.escape_markdown(lobby.note), inline=False)
 
@@ -152,7 +140,7 @@ def build_lobby_embed(
     elif status == IN_PROGRESS:
         lines.append("-# Só o resultado confirmado conta para o rank.")
     elif status == TEAMS_PROPOSED:
-        lines.append("-# Só o criador ou um admin confirma ou cancela. N/5 = nível na role.")
+        lines.append("-# Só o criador ou um admin confirma ou cancela.")
     embed.description = "\n".join(lines)
     return embed
 
@@ -166,7 +154,6 @@ def _add_teams(
         return "Não consegui formar equipas. Um admin pode cancelar e recomeçar."
     embed.add_field(name=f"{SIDE_EMOJI['blue']} Azul", value=team_text(proposal.blue, roles))
     embed.add_field(name=f"{SIDE_EMOJI['red']} Vermelho", value=team_text(proposal.red, roles))
-    embed.add_field(name="⚖️ Equilíbrio", value=band_text(proposal), inline=False)
     return None
 
 
@@ -213,8 +200,8 @@ def report_ping(snapshot: LobbySnapshot) -> tuple[str, list[EntryView]] | None:
         return None
     mentions = " ".join(f"<@{e.discord_id}>" for e in targets)
     return (
-        f"📣 {mentions} — foi reportado que o **{SIDE_NAME[match.winner]} ganhou** o Scrim "
-        f"#{snapshot.lobby.id}. Confirmem ou contestem na mensagem da lobby.",
+        f"📣 {mentions} — foi reportado que o **{SIDE_NAME[match.winner]} ganhou** o "
+        f"{game_label(snapshot)}. Confirmem ou contestem na mensagem da lobby.",
         targets,
     )
 
@@ -225,7 +212,7 @@ def result_reminder_ping(snapshot: LobbySnapshot) -> tuple[str, list[EntryView]]
         return None
     mentions = " ".join(f"<@{e.discord_id}>" for e in targets)
     return (
-        f"⏰ {mentions} — o Scrim #{snapshot.lobby.id} ainda não tem resultado. "
+        f"⏰ {mentions} — o {game_label(snapshot)} ainda não tem resultado. "
         "Reportem quem ganhou na mensagem da lobby.",
         targets,
     )
@@ -278,15 +265,15 @@ def result_summary(
     match = snapshot.match
     if match is None:
         return None
-    lobby_id = snapshot.lobby.id
+    label = game_label(snapshot)
     winner = SIDE_NAME.get(match.winner or "", "?")
     if "voided" in events:
-        head = f"🚫 Scrim #{lobby_id} anulado ({match.void_reason or 'sem motivo'})."
+        head = f"🚫 {label} anulado ({match.void_reason or 'sem motivo'})."
     elif "fixed" in events:
-        head = f"✏️ Resultado do Scrim #{lobby_id} corrigido: **{winner} ganhou**."
+        head = f"✏️ Resultado do {label} corrigido: **{winner} ganhou**."
     elif "result_confirmed" in events:
         how = " (confirmado automaticamente)" if match.auto_confirmed else ""
-        head = f"🏆 Scrim #{lobby_id}: **{winner} ganhou**{how}!"
+        head = f"🏆 {label}: **{winner} ganhou**{how}!"
         hint = f"📝 Regista o teu campeão e KDA com `/match stats` (jogo #{match.id})."
         return "\n".join([head, *standing_lines(changes, names, ladder), hint])
     else:

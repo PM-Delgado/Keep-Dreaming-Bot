@@ -144,7 +144,7 @@ score = 1.0   * |P(blue wins) - 0.5|
   proficiency 4 / 3 / 2 / 1 (1.0 if unknown).
 * **Role cost** is what playing a role costs the player: 0 / 0.5 / 1.0 / 2.5 / 4.0 at proficiency
   5 / 4 / 3 / 2 / 1, and 1.5 if unknown. With five junglers, one plays Jungle per team and the
-  others go to their next-best role (the proposal marks them `4/5`).
+  others go to their next-best role (the proposal does not show it).
 * **Lane gap**: equal-strength players are placed against each other in the same lane, so two
   Masters both meet in Mid (or both go off-lane) instead of one crushing a weak lane.
 * **Top-2 / spread / elite** terms keep the strongest players spread across both teams.
@@ -152,8 +152,9 @@ score = 1.0   * |P(blue wins) - 0.5|
   reroll**: cancel and reopen the lobby to get a different split.
 * The search is exact for the winning split and takes about 0.2 s, run in a worker thread.
 
-Players only see a coarse label, from the win-probability gap: *Equilibrado* (under 3 points off
-50%), *ligeira vantagem* (3-7), *vantagem clara* (7-15), *muito desequilibrado* (15 or more).
+The proposal message shows no balance label and no role levels. The coarse band from the
+win-probability gap (*equilibrado* under 3 points off 50%, *ligeira vantagem* 3-7, *vantagem clara*
+7-15, *muito desequilibrado* 15 or more) is still computed (`balance_band`) for tests and tools.
 
 Code: `balance/engine.py` (search), `balance/model.py` (`BalanceParams`, the numbers above).
 
