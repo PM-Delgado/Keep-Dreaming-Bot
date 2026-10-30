@@ -25,7 +25,7 @@ every error message is private). Commands marked *admin* need your Discord user 
 | `/lobby schedule <when> [note]` | public | Schedule a lobby (Lisbon time, e.g. `21:00`, `21h30`, `amanhã 21:00`, `sexta 21:00`, `15/08 21:00`, `2026-08-15 21:00`). A reminder goes out 30 minutes before. Same channel limit and spoiler-tagged role as `/lobby open`. |
 | `/lobby list` | public | Heading `📋 Scrims`, then the open lobby and the scheduled ones (status emoji each); a friendly message when there are none. |
 | `/lobby show [lobby]` | public | Re-post a lobby message here (the stale copy is removed; no new tag). Same channel limit. |
-| `/lobby cancel [lobby]` | private | Cancel a lobby (its creator or an admin). |
+| `/lobby cancel [lobby]` | private | Cancel a lobby (its creator or an admin); its message is deleted. |
 | `/match show [match]` | public | Large heading `🏆 Jogo #n · Confirmado`, the winner, teams (role icon, name, champion icon, KDA, ⏳ = pending); a confirmed game takes the winning side's colour; a small line at the bottom says who confirmed the result and who validated the KDAs. Default: the latest game. |
 | `/match stats <champion> <kills> <deaths> <assists> [match]` | private | Record your own champion (autocomplete) and KDA (0-99) for a confirmed game; default: your latest game without validated stats. Waits for an admin to validate it. |
 | `/match void <match> [reason]` | private + channel notice | *Admin.* Cancel a game; undoes its effect on ratings if it was confirmed. |
@@ -39,6 +39,16 @@ The lobby message carries the buttons (each with an emoji): **Entrar**, **Sair**
 **Cancelar**. Only the buttons that make sense for the current state are shown. When a result is
 confirmed, corrected or voided the bot also posts a summary in the channel (winner, promotions,
 demotions, finished placements, and a reminder to use `/match stats`).
+
+A lobby is titled `Scrim #n` until its teams are confirmed; from then on the lobby message and
+every message about the game say `Jogo #n` (the game's number, the same as in `/match`), so a
+cancelled lobby never makes the two numbers differ. The channel is kept tidy: the reminder, the
+ready-check ping and the "please confirm" pings are deleted as soon as they are no longer needed
+(the ready-check ping when the teams appear or the check restarts, the reminder when the
+ready-check starts, the confirm pings when the result is confirmed or the lobby is cancelled).
+A cancelled lobby's message is deleted too (so is that of a voided game, whose summary stays).
+What stays is the lobby message (with the teams, no balance label and no proficiency notes) and
+the result summary.
 
 #### Riot accounts (optional, needs `RIOT_API_KEY`)
 

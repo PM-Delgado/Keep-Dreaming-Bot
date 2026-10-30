@@ -234,6 +234,32 @@ class LobbyRepository:
         await self.db.conn.commit()
         return cur.rowcount == 1
 
+    # --- alerts: short-lived messages around a lobby, deleted when no longer needed ----------
+
+    async def add_alert(
+        self, lobby_id: int, channel_id: int, message_id: int, kind: str, now: datetime
+    ) -> None:
+        await self.db.conn.execute(
+            "INSERT OR REPLACE INTO lobby_alerts (message_id, lobby_id, channel_id, kind,"
+            " created_at) VALUES (?, ?, ?, ?, ?)",
+            (message_id, lobby_id, channel_id, kind, to_db(now)),
+        )
+        await self.db.conn.commit()
+
+    async def alerts(self, lobby_id: int, kinds: Sequence[str]) -> list[tuple[int, int]]:
+        """(channel id, message id) of the lobby's alerts of these kinds, oldest first."""
+        marks = ",".join("?" * len(kinds))
+        async with self.db.conn.execute(
+            "SELECT channel_id, message_id FROM lobby_alerts"
+            f" WHERE lobby_id = ? AND kind IN ({marks}) ORDER BY message_id",
+            (lobby_id, *kinds),
+        ) as cur:
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
+    async def remove_alert(self, message_id: int) -> None:
+        await self.db.conn.execute("DELETE FROM lobby_alerts WHERE message_id = ?", (message_id,))
+        await self.db.conn.commit()
+
     async def touch(self, lobby_id: int, now: datetime) -> None:
         await self.db.conn.execute(
             "UPDATE lobbies SET updated_at = ? WHERE id = ?", (to_db(now), lobby_id)

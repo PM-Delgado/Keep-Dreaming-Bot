@@ -23,7 +23,15 @@ from bot.features.lobby.render import (
     stats_suffix,
     validation_footer,
 )
-from bot.features.lobby.repository import ACTIVE, LobbyRepository, LobbyRow
+from bot.features.lobby.repository import (
+    ACTIVE,
+    CANCELLED,
+    COMPLETED,
+    OPEN,
+    READY_CHECK,
+    LobbyRepository,
+    LobbyRow,
+)
 from bot.features.lobby.schedule import EXAMPLES
 from bot.features.lobby.service import LobbyParams, LobbyService, LobbySnapshot, LobbyUpdate
 from bot.features.lobby.views import LobbyView, state_of
@@ -150,31 +158,74 @@ class Lobby(commands.Cog):
         return {"embed": embed, "view": view if view.children else None}
 
     async def refresh_message(self, snapshot: LobbySnapshot) -> None:
-        """Re-render the public lobby message (best effort: it may have been deleted)."""
+        """Re-render the public lobby message (best effort: it may have been deleted), and
+        remove the alerts the new state makes pointless. A cancelled lobby's message is deleted."""
         lobby = snapshot.lobby
+        await self._settle_alerts(snapshot)
         if lobby.message_id is None:
             return
         try:
             channel = self.bot.get_channel(lobby.channel_id) or await self.bot.fetch_channel(
                 lobby.channel_id
             )
-            await channel.get_partial_message(lobby.message_id).edit(  # type: ignore[union-attr]
-                **self.message_kwargs(snapshot)
-            )
+            message = channel.get_partial_message(lobby.message_id)  # type: ignore[union-attr]
+            if lobby.status == CANCELLED:
+                await message.delete()
+            else:
+                await message.edit(**self.message_kwargs(snapshot))
+        except discord.NotFound:
+            pass
         except (discord.HTTPException, AttributeError):
             log.warning("Could not update the message of lobby %s", lobby.id, exc_info=True)
 
-    async def _send_ping(self, lobby: LobbyRow, text: str, discord_ids: list[int]) -> None:
+    async def _send_ping(
+        self, lobby: LobbyRow, text: str, discord_ids: list[int], kind: str | None = None
+    ) -> None:
+        """Post a message in the lobby's channel. With a `kind` it is an alert: its id is kept so
+        it can be deleted later (`_settle_alerts`); without one it stays for good."""
         users = [discord.Object(id=i) for i in discord_ids]
         try:
             channel = self.bot.get_channel(lobby.channel_id) or await self.bot.fetch_channel(
                 lobby.channel_id
             )
-            await channel.send(  # type: ignore[union-attr]
+            sent = await channel.send(  # type: ignore[union-attr]
                 text, allowed_mentions=discord.AllowedMentions(users=users)
             )
+            if kind is not None:
+                await self.service.add_alert(lobby, sent.id, kind)
         except (discord.HTTPException, AttributeError):
             log.warning("Could not ping lobby %s", lobby.id, exc_info=True)
+
+    async def _clear_alerts(self, lobby_id: int, kinds: tuple[str, ...]) -> None:
+        """Delete the lobby's alerts of these kinds (best effort: a message may be gone already)."""
+        try:
+            for channel_id, message_id in await self.service.repo.alerts(lobby_id, kinds):
+                try:
+                    channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(
+                        channel_id
+                    )
+                    await channel.get_partial_message(message_id).delete()  # type: ignore[union-attr]
+                except discord.NotFound:
+                    pass
+                except (discord.HTTPException, AttributeError):
+                    log.warning("Could not delete alert %s of lobby %s", message_id, lobby_id)
+                await self.service.repo.remove_alert(message_id)
+        except Exception:
+            log.exception("Could not clear the alerts of lobby %s", lobby_id)
+
+    async def _settle_alerts(self, snapshot: LobbySnapshot) -> None:
+        """Alerts only live while they matter: the ready-check ping during the ready-check, the
+        reminder while the lobby waits to start, the confirm/result pings until the game ends."""
+        lobby = snapshot.lobby
+        kinds: tuple[str, ...] = ()
+        if lobby.status != READY_CHECK:
+            kinds += ("ready",)
+        if lobby.status != OPEN:
+            kinds += ("reminder",)
+        if lobby.status in (COMPLETED, CANCELLED):
+            kinds += ("result",)
+        if kinds:
+            await self._clear_alerts(lobby.id, kinds)
 
     async def notify(self, update: LobbyUpdate) -> None:
         """Ping real players (never mock ones): ready-check (re)starts, scheduled reminders."""
@@ -191,19 +242,24 @@ class Lobby(commands.Cog):
         if {"ready_check_started", "roster_changed", "timeout"} & events:
             text = ready_check_ping(update.snapshot, "ready_check_started" not in events)
             if text is not None:
+                await self._clear_alerts(lobby.id, ("ready",))  # the new ping replaces the old
                 await self._send_ping(
-                    lobby, text, [e.discord_id for e in update.snapshot.roster if not e.is_mock]
+                    lobby,
+                    text,
+                    [e.discord_id for e in update.snapshot.roster if not e.is_mock],
+                    "ready",
                 )
         for event in ("reminder", "short_of_players"):
             if event in events and (ping := scheduled_ping(update.snapshot, event)) is not None:
                 text, recipients = ping
-                await self._send_ping(lobby, text, [e.discord_id for e in recipients])
+                await self._send_ping(lobby, text, [e.discord_id for e in recipients], "reminder")
         asks_to_confirm = "reported" in events and "result_confirmed" not in events
         if asks_to_confirm and (ping := report_ping(update.snapshot)) is not None:
-            await self._send_ping(lobby, ping[0], [e.discord_id for e in ping[1]])
+            await self._send_ping(lobby, ping[0], [e.discord_id for e in ping[1]], "result")
         if "result_reminder" in events and (ping := result_reminder_ping(update.snapshot)):
-            await self._send_ping(lobby, ping[0], [e.discord_id for e in ping[1]])
+            await self._send_ping(lobby, ping[0], [e.discord_id for e in ping[1]], "result")
         if {"result_confirmed", "fixed", "voided"} & events:
+            await self._clear_alerts(lobby.id, ("result",))
             await self._send_result_summary(update)
 
     async def _send_result_summary(self, update: LobbyUpdate) -> None:
@@ -253,6 +309,10 @@ class Lobby(commands.Cog):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.edit_message(**self.message_kwargs(update.snapshot))
+        if update.snapshot.lobby.status == CANCELLED:
+            await self.refresh_message(update.snapshot)  # deletes the message and the alerts
+        else:
+            await self._settle_alerts(update.snapshot)
         await self.notify(update)
 
     # --- /lobby ----
@@ -376,6 +436,7 @@ class Lobby(commands.Cog):
             return
         await interaction.response.send_message("🛑 Lobby cancelada.", ephemeral=True)
         await self.refresh_message(update.snapshot)
+        await self.notify(update)
 
     # --- /match ----
 

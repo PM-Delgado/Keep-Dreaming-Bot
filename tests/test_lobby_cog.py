@@ -14,11 +14,9 @@ from bot.features.icons.roles import RoleEmojiRepository, RoleIconService
 from bot.features.lobby.cog import Lobby, scrim_setup_problems
 from bot.features.lobby.mock import MockPlayers
 from bot.features.lobby.render import (
-    band_text,
     build_list_embed,
     build_lobby_embed,
     build_pending_embed,
-    fit_note,
     ready_check_ping,
     result_summary,
     scheduled_ping,
@@ -56,8 +54,11 @@ class FakeChannel:
     def get_partial_message(self, message_id: int) -> FakeMessage:
         return self.messages.setdefault(message_id, FakeMessage(message_id))
 
-    async def send(self, content: str | None = None, **kwargs: Any) -> None:
+    async def send(self, content: str | None = None, **kwargs: Any) -> FakeMessage:
         self.sent.append({"content": content, **kwargs})
+        message = FakeMessage(5000 + len(self.sent))
+        self.messages[message.id] = message
+        return message
 
 
 class FakeBot:
@@ -193,7 +194,7 @@ async def test_show_reposts_the_message_and_removes_the_stale_one(env):
     assert env.channel.messages[777].deleted
 
 
-async def test_cancel_command_is_for_creator_or_admin_and_updates_the_message(env):
+async def test_cancel_command_is_for_creator_or_admin_and_deletes_the_message(env):
     await open_as(env)
     await env.stack.register(2)
     ix = FakeInteraction(2)
@@ -202,9 +203,14 @@ async def test_cancel_command_is_for_creator_or_admin_and_updates_the_message(en
     ix = FakeInteraction(ADMIN)
     await env.cog.cancel_lobby.callback(env.cog, ix)
     assert ix.sent[0]["content"] == "🛑 Lobby cancelada."
-    edit = env.channel.messages[777].edits[-1]
-    assert "Cancelada" in text_of(edit["embed"])
-    assert edit["view"] is None  # a closed lobby has no buttons
+    assert env.channel.messages[777].deleted  # a cancelled scrim leaves nothing behind
+
+
+async def test_cancelling_with_the_button_deletes_the_message_too(env):
+    await open_as(env)
+    ix = FakeInteraction(1, 777)
+    await env.cog.on_action(ix, "cancel")  # type: ignore[arg-type]
+    assert env.channel.messages[777].deleted
 
 
 # --- buttons ----
@@ -439,25 +445,12 @@ async def test_no_raw_ratings_anywhere_in_the_player_facing_embeds(env):
         assert hidden not in text
 
 
-def test_text_helpers():
-    proposal = SimpleNamespace(band="clear", favoured="red")
-    assert band_text(proposal) == "Vantagem clara Vermelho"  # type: ignore[arg-type]
-    assert band_text(SimpleNamespace(band="even", favoured=None)) == "Equilibrado"  # type: ignore[arg-type]
-    assert "Muito desequilibrado" in band_text(SimpleNamespace(band="lopsided", favoured="blue"))  # type: ignore[arg-type]
-
-
-def test_off_role_players_are_flagged_and_best_role_players_are_not():
+def test_team_lines_never_show_the_proficiency_note():
     on_best = SimpleNamespace(player_id=1, nickname="Ana", role="MID", fit=5, best=5)
     second = SimpleNamespace(player_id=2, nickname="Rui", role="TOP", fit=4, best=5)
     unknown = SimpleNamespace(player_id=3, nickname="Eva", role="ADC", fit=None, best=3)
-    no_data = SimpleNamespace(player_id=4, nickname="Zé", role="JUNGLE", fit=None, best=None)
-    assert fit_note(on_best) == ""  # type: ignore[arg-type]
-    assert fit_note(second) == " · 4/5"  # type: ignore[arg-type]
-    assert fit_note(unknown) == " · ?/5"  # type: ignore[arg-type]
-    assert fit_note(no_data) == ""  # type: ignore[arg-type]
-    text = team_text([on_best, second])  # type: ignore[list-item]
-    assert text.splitlines()[0] == "**Mid** — Ana"  # no note for someone on their best role
-    assert "**Top** — Rui · 4/5" in text
+    text = team_text([on_best, second, unknown])  # type: ignore[list-item]
+    assert text.splitlines() == ["**Mid** — Ana", "**Top** — Rui", "**ADC** — Eva"]
 
 
 def test_team_lines_use_the_role_icon_instead_of_the_role_name():
@@ -466,7 +459,7 @@ def test_team_lines_use_the_role_icon_instead_of_the_role_name():
     icons = {"MID": "<:role_mid:8>"}
     lines = team_text([on_best, second], icons).splitlines()  # type: ignore[list-item]
     assert lines[0] == "<:role_mid:8> Ana"  # no word, no dash
-    assert lines[1] == "**Top** — Rui · 4/5"  # no Top icon yet: the name, plus the note
+    assert lines[1] == "**Top** — Rui"  # no Top icon yet: the name
 
 
 async def test_the_lobby_message_and_match_show_use_role_icons_once_uploaded(env):
@@ -510,15 +503,18 @@ async def test_match_show_shows_the_role_icon_of_the_role_actually_played(env):
     assert f"{support} Player {player:02d}" in text_of(ix.sent[0]["embed"])
 
 
-async def test_the_proposal_embed_notes_who_plays_off_their_best_role(env):
+async def test_the_proposal_embed_has_no_proficiency_notes_and_no_balance_field(env):
     lobby_id, _ = await open_as(env)
     await env.mock.create(9, ADMIN, main_role="MID")  # everyone mains MID: eight must move
     await env.mock.fill(lobby_id, 9, ADMIN)
     await env.mock.ready_all(lobby_id)
     await env.stack.players.set_declared(1, "MID", 5)
     update = await env.stack.lobbies.ready(lobby_id, 1)
-    text = text_of(build_lobby_embed(update.snapshot))
-    assert text.count("/5") >= 6  # most players are off their best role and are flagged
+    embed = build_lobby_embed(update.snapshot)
+    text = text_of(embed)
+    assert "/5" not in text
+    assert "Equilíbrio" not in text
+    assert [f.name for f in embed.fields] == ["🔵 Azul", "🔴 Vermelho"]
 
 
 def test_ping_text_helper_returns_none_when_everyone_is_ready_or_a_mock():
@@ -761,6 +757,95 @@ async def test_the_sweeper_nudges_unreported_games_once(env):
     assert all(f"<@{pid}>" in ping["content"] for pid in range(1, 11))
 
 
+# --- one number, and alerts that clean up after themselves ----
+
+
+async def test_the_title_uses_the_game_number_once_a_game_exists(env):
+    await env.stack.register(1)
+    for _ in range(2):  # two lobbies that never reach a game: ids 1 and 2 are used up
+        update = await env.stack.lobbies.open(GUILD, CHANNEL, 1)
+        await env.stack.lobbies.cancel(update.snapshot.lobby.id, 1, "cancelada")
+    lobby_id, sides = await started_game(env)
+    assert lobby_id == 3
+    snap = await env.stack.lobbies.snapshot(lobby_id)
+    assert (build_lobby_embed(snap).description or "").startswith("# ⚔️ Jogo #1 · Em jogo")
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+    [ping] = env.channel.sent
+    assert "Jogo #1" in ping["content"] and "Scrim" not in ping["content"]
+    await env.cog.on_action(FakeInteraction(sides["red"][0], 777), "confirm_result")  # type: ignore[arg-type]
+    summary = env.channel.sent[-1]["content"]
+    assert summary.startswith("🏆 Jogo #1: **Azul ganhou**!")
+    assert "(jogo #1)" in summary
+
+
+async def test_the_reminder_goes_away_when_the_ready_check_starts(env):
+    lobby_id = await schedule_as(env)
+    env.stack.clock.advance(minutes=95)
+    await env.cog.sweeper.coro(env.cog)
+    [reminder] = env.channel.sent
+    assert "Lembrete" in reminder["content"]
+    reminder_id = 5001
+    assert not env.channel.messages[reminder_id].deleted  # still useful: the lobby has not started
+    await env.mock.fill(lobby_id, 9, ADMIN)
+    env.stack.clock.advance(hours=2)
+    await env.cog.sweeper.coro(env.cog)  # the time has come: the ready-check starts
+    assert env.channel.messages[reminder_id].deleted
+
+
+async def test_a_restarted_ready_check_replaces_its_ping_and_teams_remove_it(env):
+    from bot.features.lobby.service import LobbyUpdate
+
+    lobby_id, _ = await open_as(env)
+    await env.stack.register(1, start=2)
+    await env.stack.lobbies.join(lobby_id, 2)
+    result = await env.mock.fill(lobby_id, 8, ADMIN)
+    await env.cog.notify(LobbyUpdate(await env.stack.lobbies.snapshot(lobby_id), result.events))
+    await env.cog.notify(
+        LobbyUpdate(await env.stack.lobbies.snapshot(lobby_id), ["roster_changed"])
+    )
+    first, second = 5001, 5002
+    assert env.channel.messages[first].deleted  # replaced by the restarted check's ping
+    assert not env.channel.messages[second].deleted
+    await env.mock.ready_all(lobby_id)
+    await env.stack.lobbies.ready(lobby_id, 2)
+    update = await env.stack.lobbies.ready(lobby_id, 1)
+    assert update.snapshot.lobby.status == "TEAMS_PROPOSED"
+    await env.cog.refresh_message(update.snapshot)
+    assert env.channel.messages[second].deleted  # the teams are the message that stays
+
+
+async def test_cancelling_removes_the_alerts_of_the_lobby(env):
+    from bot.features.lobby.service import LobbyUpdate
+
+    lobby_id, _ = await open_as(env)
+    result = await env.mock.fill(lobby_id, 9, ADMIN)
+    await env.cog.notify(LobbyUpdate(await env.stack.lobbies.snapshot(lobby_id), result.events))
+    ix = FakeInteraction(1)
+    await env.cog.cancel_lobby.callback(env.cog, ix, lobby_id)  # type: ignore[arg-type]
+    assert env.channel.messages[5001].deleted
+
+
+async def test_confirm_pings_go_when_the_result_is_confirmed_but_the_summary_stays(env):
+    lobby_id, sides = await started_game(env)
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+    assert not env.channel.messages[5001].deleted  # "please confirm" while it is pending
+    await env.cog.on_action(FakeInteraction(sides["red"][0], 777), "confirm_result")  # type: ignore[arg-type]
+    assert env.channel.messages[5001].deleted
+    assert not env.channel.messages[5002].deleted  # the result summary is kept
+
+
+async def test_a_message_already_deleted_by_someone_does_not_break_the_clean_up(env):
+    lobby_id, sides = await started_game(env)
+    await env.cog.on_action(FakeInteraction(sides["blue"][0], 777), "report_blue")  # type: ignore[arg-type]
+
+    async def gone() -> None:
+        raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Unknown Message")  # type: ignore[arg-type]
+
+    env.channel.messages[5001].delete = gone  # type: ignore[method-assign]
+    await env.cog.on_action(FakeInteraction(sides["red"][0], 777), "confirm_result")  # type: ignore[arg-type]
+    assert await env.stack.lobbies.repo.alerts(lobby_id, ("result",)) == []  # forgotten anyway
+
+
 async def test_a_promotion_is_announced_once_placement_is_done(env):
     await env.stack.register(1, start=ADMIN)
     last = None
@@ -814,12 +899,7 @@ async def test_match_fix_and_void_are_for_admins_and_update_the_message(env):
     assert "corrigido" in env.channel.sent[0]["content"]
     ix = FakeInteraction(ADMIN)
     await env.cog.match_void.callback(env.cog, ix, match.id, "erro de registo")  # type: ignore[arg-type]
-    assert "Lobby encerrada (erro de registo)" in text_of(
-        env.channel.messages[777].edits[-1]["embed"]
-    )
-    assert assert_bullets(env.channel.messages[777].edits[-1]["embed"]) == [
-        "- Lobby encerrada (erro de registo)."
-    ]
+    assert env.channel.messages[777].deleted  # the voided game leaves only its summary
     assert "anulado" in env.channel.sent[-1]["content"]
     ix = FakeInteraction(1)
     await env.cog.match_void.callback(env.cog, ix, match.id, "x")  # type: ignore[arg-type]

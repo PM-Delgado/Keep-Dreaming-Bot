@@ -196,6 +196,9 @@ class LobbyService:
     async def attach_message(self, lobby_id: int, message_id: int, channel_id: int | None = None):
         await self.repo.set_message(lobby_id, message_id, channel_id)
 
+    async def add_alert(self, lobby: LobbyRow, message_id: int, kind: str) -> None:
+        await self.repo.add_alert(lobby.id, lobby.channel_id, message_id, kind, self.clock())
+
     async def lobby_for_message(self, message_id: int) -> LobbyRow | None:
         return await self.repo.get_by_message(message_id)
 
