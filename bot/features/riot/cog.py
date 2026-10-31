@@ -674,6 +674,7 @@ async def setup(bot: "KDBot") -> None:
     players_cog.players.champion_pooler = service.champion_pool
     players_cog.players.view_refresh_due = service.view_refresh_due
     players_cog.players.view_refresher = service.refresh_for_view
+    players_cog.players.on_left.append(service.forget_player)
     await bot.add_cog(
         Riot(
             bot,

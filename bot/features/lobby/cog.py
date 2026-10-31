@@ -91,6 +91,7 @@ class Lobby(commands.Cog):
     async def sweeper(self) -> None:
         try:
             updates = [
+                *await self.service.drop_left_players(),
                 *await self.service.process_schedules(),
                 *await self.service.process_deadlines(),
                 *await self.service.process_matches(),

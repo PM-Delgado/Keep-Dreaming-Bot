@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from bot.features.players.repository import Player
 from bot.features.players.service import PlayerError, PlayerService
 from bot.features.ratings.service import RatingService
 from bot.features.riot.client import (
@@ -289,6 +290,15 @@ class RiotService:
         assert new_main is not None
         return UnlinkResult(account, new_main, await self._try_refresh_rank(player_id, by))
 
+    async def forget_player(self, player: Player) -> None:
+        """The player left the server: unlink every account (the same deletions as /riot unlink)."""
+        accounts = await self.repo.list_accounts(player.id)
+        for account in accounts:
+            await self.ratings.repo.delete_riot_signals(account.puuid)
+            await self.repo.delete_account(account.id)
+        if accounts:
+            log.info("Unlinked %d Riot account(s) of %r, who left.", len(accounts), player.nickname)
+
     async def accounts(self, discord_id: int) -> list[tuple[AccountRow, int]]:
         player = await self.players.require(discord_id)
         return [
@@ -447,6 +457,10 @@ class RiotService:
         await self.sync_history(account)  # stores the new games, 1 request when there are none
         pending = await self.repo.pending_games(account.id, account.feed_since)
         if not pending:
+            return
+        # Nobody is posted about once they left the server (the periodic check may not have run).
+        player = await self.players.repo.get(account.player_id)
+        if player is not None and not await self.players.still_member(player):
             return
         # Remakes and games that ended long ago are marked as handled without a post.
         too_short = self.history.min_duration_s

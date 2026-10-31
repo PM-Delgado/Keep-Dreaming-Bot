@@ -324,6 +324,19 @@ class LobbyRepository:
             row = await cur.fetchone()
         return _lobby(row) if row else None
 
+    async def entries_of_left_players(self) -> list[tuple[int, int]]:
+        """(lobby id, player id) of players who left the server and still hold a place in a
+        lobby that has not started."""
+        marks = ",".join("?" * len(BLOCKING))
+        async with self.db.conn.execute(
+            "SELECT e.lobby_id, e.player_id FROM lobby_entries e"
+            " JOIN lobbies l ON l.id = e.lobby_id JOIN players p ON p.id = e.player_id"
+            f" WHERE p.left_at IS NOT NULL AND e.status != 'dropped' AND l.status IN ({marks})"
+            " ORDER BY e.lobby_id, e.player_id",
+            BLOCKING,
+        ) as cur:
+            return [(r[0], r[1]) for r in await cur.fetchall()]
+
     async def active_lobby_of(self, player_id: int) -> LobbyRow | None:
         """The lobby (if any) in which the player is signed up and that has not finished."""
         marks = ",".join("?" * len(ACTIVE))

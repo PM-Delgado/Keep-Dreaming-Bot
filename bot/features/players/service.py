@@ -20,6 +20,9 @@ from bot.features.ratings.service import RatingService
 NICKNAME_MIN, NICKNAME_MAX = 2, 24
 NOT_REGISTERED = "KD Scrims: Jogador não registado. Usa /register primeiro."
 CHAMPION_POOL_SIZE = 3  # champions shown from the player's ranked Solo/Duo games
+# A sweep that finds this many players gone, and more than half of everyone checked, is not
+# believed (wrong server id, the bot lost access): nobody is marked.
+SWEEP_DISTRUST = 3
 
 
 log = logging.getLogger(__name__)
@@ -88,6 +91,10 @@ class PlayerService:
         # `refresher` may wait for Riot (bounded) and never raises.
         self.view_refresh_due: Callable[[int], Awaitable[bool]] | None = None
         self.view_refresher: Callable[[int], Awaitable[None]] | None = None
+        # Set by the Players cog: is the Discord user still in the server? None = could not tell.
+        self.membership: Callable[[int], Awaitable[bool | None]] | None = None
+        # Set by the optional modules: what to forget when a player leaves (never raises).
+        self.on_left: list[Callable[[Player], Awaitable[None]]] = []
 
     async def profile_refresh_due(self, discord_id: int) -> bool:
         return bool(self.view_refresh_due and await self.view_refresh_due(discord_id))
@@ -109,9 +116,11 @@ class PlayerService:
         An existing player is never modified: the check runs before any validation or write.
         """
         existing = await self.repo.get_by_discord(discord_id)
-        if existing is not None:
+        if existing is not None and existing.left_at is None:
             raise AlreadyRegisteredError(existing)
         nickname = clean_nickname(nickname)
+        if existing is not None:
+            return await self._come_back(existing, nickname)
         try:
             player = await self.repo.create(discord_id, nickname, self.clock(), is_mock)
         except AlreadyRegistered:  # lost a race with another registration of the same user
@@ -127,6 +136,58 @@ class PlayerService:
             " [mock]" if is_mock else "",
         )
         return player
+
+    async def _come_back(self, player: Player, nickname: str) -> Player:
+        try:
+            player = await self.repo.reactivate(player.id, nickname)
+        except NicknameTaken:
+            raise PlayerError(f"O nickname «{nickname}» já está em uso.") from None
+        log.info("Player %s %r is back (discord %s)", player.id, nickname, player.discord_id)
+        return player
+
+    # --- leaving the server ------------------------------------------------------------------
+
+    async def mark_left(self, player: Player) -> bool:
+        """The player is no longer in the server: keep the row (matches, ratings and stats point
+        at it) but stop using it, and let the modules forget what they hold (Riot accounts).
+        False when they were already marked."""
+        if player.left_at is not None:
+            return False
+        await self.repo.set_left(player.id, self.clock())
+        log.info(
+            "Player %s %r left the server (discord %s)",
+            player.id,
+            player.nickname,
+            player.discord_id,
+        )
+        for forget in self.on_left:
+            try:
+                await forget(player)
+            except Exception:
+                log.exception("Forgetting player %s after they left failed", player.id)
+        return True
+
+    async def still_member(self, player: Player) -> bool:
+        """False, and the player is marked as left, only when Discord says they are gone."""
+        if self.membership is None or await self.membership(player.discord_id) is not False:
+            return True
+        await self.mark_left(player)
+        return False
+
+    async def sweep_left(self) -> list[Player]:
+        """Mark every active real player who is no longer in the server."""
+        if self.membership is None:
+            return []
+        active = await self.repo.list_active()
+        gone = [p for p in active if await self.membership(p.discord_id) is False]
+        if len(gone) >= SWEEP_DISTRUST and len(gone) * 2 > len(active):
+            log.warning(
+                "Member sweep: %d of %d players look gone; not believed, nobody marked.",
+                len(gone),
+                len(active),
+            )
+            return []
+        return [p for p in gone if await self.mark_left(p)]
 
     async def require(self, discord_id: int) -> Player:
         player = await self.repo.get_by_discord(discord_id)
