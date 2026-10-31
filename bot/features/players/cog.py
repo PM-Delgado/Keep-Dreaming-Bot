@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+MEMBER_CHECK_MINUTES = 15  # how often the bot looks for players who left the server
+UNKNOWN_MEMBER = 10007  # Discord's error code for "that user is not a member of the server"
+
 
 class Players(commands.Cog):
     def __init__(
@@ -49,6 +52,41 @@ class Players(commands.Cog):
         # Set by the stats extension (loaded after this one): in-house numbers and champion icons.
         self.stats: StatsService | None = None
         self.champions: ChampionService | None = None
+        self.players.membership = self._is_member
+
+    async def cog_load(self) -> None:
+        self.member_sweeper.start()
+
+    async def cog_unload(self) -> None:
+        self.member_sweeper.cancel()
+
+    async def _is_member(self, discord_id: int) -> bool | None:
+        """Is the user still in the server? None when Discord cannot say (never treated as gone).
+        Asks Discord directly: the default intents keep no member list."""
+        guild = self.bot.get_guild(self.bot.settings.guild_id)
+        if guild is None:
+            return None
+        try:
+            await guild.fetch_member(discord_id)
+        except discord.NotFound as exc:
+            return False if exc.code == UNKNOWN_MEMBER else None
+        except discord.HTTPException:
+            return None
+        return True
+
+    @tasks.loop(minutes=MEMBER_CHECK_MINUTES)
+    async def member_sweeper(self) -> None:
+        try:
+            gone = await self.players.sweep_left()
+        except Exception:
+            log.exception("The member check crashed")
+            return
+        if gone:
+            log.info("Member check: %d player(s) left the server.", len(gone))
+
+    @member_sweeper.before_loop
+    async def _before_member_sweeper(self) -> None:
+        await self.bot.wait_until_ready()
 
     profile = app_commands.Group(name="profile", description="O teu perfil de Scrims.")
 

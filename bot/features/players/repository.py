@@ -126,6 +126,29 @@ class PlayerRepository:
         )
         await self.db.conn.commit()
 
+    async def reactivate(self, player_id: int, nickname: str) -> Player:
+        """A player who left comes back: same row (ratings, matches and stats stay), maybe a new
+        nickname."""
+        try:
+            await self.db.conn.execute(
+                "UPDATE players SET left_at = NULL, nickname = ? WHERE id = ?",
+                (nickname, player_id),
+            )
+        except sqlite3.IntegrityError as exc:
+            await self.db.conn.rollback()
+            raise NicknameTaken from exc
+        await self.db.conn.commit()
+        player = await self.get(player_id)
+        assert player is not None
+        return player
+
+    async def list_active(self) -> list[Player]:
+        """Real players who have not left."""
+        async with self.db.conn.execute(
+            f"SELECT {_COLUMNS} FROM players WHERE is_mock = 0 AND left_at IS NULL ORDER BY id"
+        ) as cur:
+            return [_player(r) for r in await cur.fetchall()]
+
     async def roles(self, player_id: int) -> dict[str, RoleRow]:
         async with self.db.conn.execute(
             "SELECT role, declared, admin_override FROM player_roles WHERE player_id = ?",

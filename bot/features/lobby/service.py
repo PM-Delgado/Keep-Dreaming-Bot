@@ -12,6 +12,7 @@ asyncio lock so multi-step reactions (reconcile) cannot interleave.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
@@ -240,6 +241,15 @@ class LobbyService:
                 raise PlayerError("Não estás nesta lobby.")
             await self.repo.touch(lobby_id, now)
             return await self._after_change(lobby_id, ["left"])
+
+    async def drop_left_players(self) -> list[LobbyUpdate]:
+        """Take players who left the server out of the lobbies that have not started (a game
+        already in progress is left alone)."""
+        updates = []
+        for lobby_id, player_id in await self.repo.entries_of_left_players():
+            with contextlib.suppress(PlayerError):  # the lobby may have moved on meanwhile
+                updates.append(await self.leave_player(lobby_id, player_id))
+        return updates
 
     async def ready(self, lobby_id: int, discord_id: int) -> LobbyUpdate:
         return await self.ready_player(lobby_id, (await self.players.require(discord_id)).id)
