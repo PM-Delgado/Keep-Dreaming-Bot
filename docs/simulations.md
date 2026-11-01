@@ -115,6 +115,36 @@ between rows because each uses a different set of simulated groups.)
 The perfect-ratings row shows the balancer is not the bottleneck: what is left is *knowing* how
 good people are, and balanced games carry little information.
 
+## Backtest: the real games
+
+The lab above invents a world. `python -m bot.features.backtest` uses the real one: it replays the
+confirmed games of a **database snapshot** under alternative settings and scores the win chance each
+variant would have predicted *before* every game against what happened.
+
+```bash
+python -m bot.features.backtest --db data/backups/kdbot-20261101.sqlite3
+python -m bot.features.backtest --db snapshot.sqlite3 --variant "mine: loss=2, aware, floor=3"
+python -m bot.features.backtest --db snapshot.sqlite3 --detail "loss x2"   # every player's H and tier
+```
+
+Make the snapshot with the procedure in [deploy.md](deploy.md#backups) (never point it at the live
+file). The tool opens it read-only and changes nothing; the bot does not load it.
+
+* **Variants:** `loss=N` scales the role-loss table (prediction, and the update if `aware`), `aware`
+  turns the role-aware update on, `floor=N` keeps sigma from dropping below N, `d_up=` / `d_down=` move
+  the bounds of E around the rank. With no `--variant` a set of presets runs.
+* **Output:** log-loss and Brier of the pre-game prediction (a coin flip is 0.693 / 0.25; lower is
+  better), the average per-game gain over today with its standard error and how many games improved,
+  and with `--detail` each player's H and visible tier under that variant.
+* **It drives the bot's own code** (`apply_match`, `effective_estimate`, the balancer's role strength
+  and win probability, the ladder). The first line of the report checks that the *baseline* replay
+  reproduces the bot's stored ratings exactly; if it does not, do not trust the rest.
+* **What it is not.** It scores predictions, not fairness; every game was played with teams built
+  under today's settings, and the same few players keep playing, so the "independent games"
+  standard error flatters the result. A difference under two standard errors is noise. With fewer than
+  20 games the report says so. The role profile of games from before migration 16 is an
+  approximation (see [matchmaking.md](matchmaking.md#what-is-stored-and-what-is-derived)).
+
 ## Adding your own experiment
 
 * A new **setting** is just a field on one of the parameter dataclasses; `tune` finds it by name.

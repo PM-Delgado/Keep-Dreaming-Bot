@@ -13,6 +13,21 @@ from aiosqlite.context import contextmanager
 
 log = logging.getLogger(__name__)
 
+
+def _profile_backfill_sql() -> str:
+    """SQL text of `"TOP":5,"JUNGLE":null,...` for a match_participants row, from player_roles."""
+    roles = ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")
+    parts = [
+        f"""'"{role}":' || coalesce((SELECT coalesce(r.admin_override, r.declared)"""
+        f""" FROM player_roles r WHERE r.player_id = match_participants.player_id"""
+        f""" AND r.role = '{role}'), 'null')"""
+        for role in roles
+    ]
+    return " || ',' || ".join(parts)
+
+
+_PROFILE_BACKFILL = _profile_backfill_sql()
+
 # Each entry upgrades the schema by one version (PRAGMA user_version = index + 1).
 MIGRATIONS: list[str] = [
     """
@@ -368,6 +383,15 @@ MIGRATIONS: list[str] = [
         created_at TEXT NOT NULL
     );
     CREATE INDEX lobby_alerts_by_lobby ON lobby_alerts(lobby_id);
+    """,
+    # 16: the role profile every player had when their game started: proficiency 1-5 (null =
+    # unknown) per role, as a JSON object. Evidence for the backtest and the optional role-aware
+    # rating update. Games that existed before this migration are filled from the players'
+    # current declared/admin values, which is an approximation (it leaves out Riot estimates and
+    # later edits). Built by concatenation, so it does not depend on SQLite's JSON functions.
+    f"""
+    ALTER TABLE match_participants ADD COLUMN proficiency_json TEXT;
+    UPDATE match_participants SET proficiency_json = '{{' || {_PROFILE_BACKFILL} || '}}';
     """,
 ]
 

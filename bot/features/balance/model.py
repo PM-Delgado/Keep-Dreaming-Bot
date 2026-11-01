@@ -3,6 +3,8 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from bot.features.ratings.params import DEFAULT_PROF_LOSS, DEFAULT_UNKNOWN_PROF_LOSS
+
 
 def _default_prof_cost() -> dict[int, float]:
     # How unhappy a player is on a role, by their proficiency there (1..5).
@@ -11,7 +13,8 @@ def _default_prof_cost() -> dict[int, float]:
 
 def _default_prof_loss() -> dict[int, float]:
     # Rating points a player loses on a role they know less well (their strength *there*).
-    return {5: 0.0, 4: 0.3, 3: 0.8, 2: 1.8, 1: 3.0}
+    # Defined once in the ratings params, shared with the role-aware rating update.
+    return dict(DEFAULT_PROF_LOSS)
 
 
 @dataclass(frozen=True)
@@ -22,7 +25,7 @@ class BalanceParams:
     prof_cost: Mapping[int, float] = field(default_factory=_default_prof_cost)
     unknown_prof_cost: float = 1.5  # slightly worse than "3": unknown is not free
     prof_loss: Mapping[int, float] = field(default_factory=_default_prof_loss)
-    unknown_prof_loss: float = 1.0
+    unknown_prof_loss: float = DEFAULT_UNKNOWN_PROF_LOSS
     # score = w_prob*|P-0.5| + w_role*sum(role cost) + w_lane*sum(lane gaps)
     #         + w_topk*top-k gap + w_spread*spread gap
     #         + elite_penalty if the strongest players are all on one team

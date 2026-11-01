@@ -308,6 +308,21 @@ def test_the_matchmaking_estimate_follows_the_rank_anchor_in_the_league():
     assert slumped.mu >= lp.rank_mu - league.params.d_down  # E cannot fall further than d_down
 
 
+def test_the_league_can_run_the_role_aware_update():
+    from bot.features.ratings.engine import RatingEngine
+    from bot.features.ratings.params import EngineParams
+
+    def run(role_aware: bool):
+        engine = RatingEngine(EngineParams(role_aware=role_aware))
+        league = League(random_roster(random.Random(11), 10), seed=11, engine=engine)
+        league.play_lobby()
+        return {pid: lp.h.mu for pid, lp in league.players.items()}
+
+    blind, aware = run(False), run(True)
+    assert blind != aware  # the roles each player got changed what the game taught
+    assert run(True) == aware  # and it is deterministic
+
+
 # --- the command-line report ----
 
 

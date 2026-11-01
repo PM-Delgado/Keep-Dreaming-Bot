@@ -1,6 +1,7 @@
 """Matches: teams confirmed -> result reported -> confirmed -> ratings; voids and corrections."""
 
 import asyncio
+import json
 
 import pytest
 import pytest_asyncio
@@ -489,3 +490,131 @@ async def test_a_game_started_before_matches_existed_still_expires_instead_of_bl
     assert expired.snapshot.lobby.status == "CANCELLED"
     assert expired.snapshot.lobby.cancel_reason == "sem resultado"
     assert await stack.repo.busy_lobby_of(1) is None
+
+
+# --- the role profile recorded when the game starts ----
+
+
+async def _player_id(stack: LobbyStack, discord_id: int) -> int:
+    player = await stack.players.repo.get_by_discord(discord_id)
+    assert player is not None
+    return player.id
+
+
+async def test_a_game_records_every_players_role_profile(stack):
+    await stack.register(10)
+    await stack.players.set_declared(1, "TOP", 5)
+    await stack.players.set_declared(1, "MID", 2)
+    await stack.players.set_admin_override(1, "MID", 3)  # the admin's value wins
+    _, match = await start_game(stack)
+    people = {p.player_id: p for p in await stack.match_repo.participants(match.id)}
+    mine = people[await _player_id(stack, 1)]
+    assert mine.proficiency is not None
+    assert mine.proficiency["TOP"] == 5
+    assert mine.proficiency["MID"] == 3
+    assert mine.proficiency["ADC"] is None  # nothing known about it
+    assert set(mine.proficiency) == {"TOP", "JUNGLE", "MID", "ADC", "SUPPORT"}
+    # Everyone has a record, even with no data at all (all unknown).
+    assert all(p.proficiency is not None for p in people.values())
+
+
+async def test_the_profile_is_frozen_with_the_game(stack):
+    await stack.register(10)
+    await stack.players.set_declared(1, "TOP", 5)
+    _, match = await start_game(stack)
+    await stack.players.set_declared(1, "TOP", 1)  # edited afterwards
+    people = {p.player_id: p for p in await stack.match_repo.participants(match.id)}
+    mine = people[await _player_id(stack, 1)]
+    assert mine.proficiency is not None
+    assert mine.proficiency["TOP"] == 5
+
+
+async def test_replay_gets_the_proficiency_on_the_assigned_role_not_the_role_played(stack):
+    await stack.register(10)
+    await stack.register(1, start=ADMIN)
+    lobby_id, match = await start_game(stack)
+    sides = await sides_of(stack, match.id)
+    people = {p.player_id: p for p in await stack.match_repo.participants(match.id)}
+    target = people[sides["blue"][0]]
+    # Rewrite the record: strong on the assigned role, weak on the role an admin later notes.
+    other = "JUNGLE" if target.role != "JUNGLE" else "TOP"
+    profile = {role: 1 for role in ("TOP", "JUNGLE", "MID", "ADC", "SUPPORT")}
+    profile[target.role] = 5
+    await stack.db.conn.execute(
+        "UPDATE match_participants SET proficiency_json = ? WHERE match_id = ? AND player_id = ?",
+        (json.dumps(profile), match.id, target.player_id),
+    )
+    await stack.db.conn.commit()
+    await stack.lobbies.report_result(lobby_id, sides["blue"][0], "blue")
+    await stack.lobbies.confirm_result(lobby_id, sides["red"][0])
+    await stack.matches.set_stats(ADMIN, match.id, target.player_id, played_role=other)
+    [game] = await stack.match_repo.confirmed_for_replay()
+    assert game.role_proficiency[target.player_id] == 5  # the assigned role, not `other`
+    assert len(game.role_proficiency) == 10
+
+
+async def test_participants_without_a_record_give_replay_nothing(stack):
+    await stack.register(10)
+    lobby_id, match = await start_game(stack)
+    sides = await sides_of(stack, match.id)
+    await stack.db.conn.execute("UPDATE match_participants SET proficiency_json = NULL")
+    await stack.db.conn.commit()
+    await stack.lobbies.report_result(lobby_id, sides["blue"][0], "blue")
+    await stack.lobbies.confirm_result(lobby_id, sides["red"][0])
+    [game] = await stack.match_repo.confirmed_for_replay()
+    assert game.role_proficiency == {}
+
+
+# --- migration 16 ----
+
+
+async def test_migration_16_fills_old_games_from_declared_and_admin_values(tmp_path):
+    import aiosqlite
+
+    from bot.db import MIGRATIONS
+
+    path = tmp_path / "kdbot.sqlite3"
+    async with aiosqlite.connect(path) as raw:
+        for i, script in enumerate(MIGRATIONS[:15], start=1):
+            await raw.executescript(f"BEGIN;{script};PRAGMA user_version = {i};COMMIT;")
+        await raw.execute("PRAGMA foreign_keys = ON")
+        for pid in (1, 2):
+            await raw.execute(
+                "INSERT INTO players (id, discord_id, nickname, created_at)"
+                f" VALUES ({pid}, {10 + pid}, 'P{pid}', 'x')"
+            )
+        await raw.execute(
+            "INSERT INTO player_roles (player_id, role, declared, admin_override, updated_at)"
+            " VALUES (1, 'TOP', 5, NULL, 'x'), (1, 'MID', 2, 4, 'x'), (1, 'ADC', NULL, NULL, 'x')"
+        )
+        await raw.execute(
+            "INSERT INTO lobbies (id, guild_id, channel_id, kind, status, created_by, created_at,"
+            " updated_at) VALUES (1, 1, 1, 'spontaneous', 'COMPLETED', 1, 'x', 'x')"
+        )
+        await raw.execute(
+            "INSERT INTO matches (id, lobby_id, guild_id, status, winner, expected_blue_win,"
+            " created_at) VALUES (1, 1, 1, 'confirmed', 'blue', 0.5, 'x')"
+        )
+        await raw.execute(
+            "INSERT INTO match_participants (match_id, player_id, side, role, h_mu_before,"
+            " h_sigma_before, est_mu, est_sigma) VALUES (1, 1, 'blue', 'TOP', 25, 8, 25, 8),"
+            " (1, 2, 'red', 'TOP', 25, 8, 25, 8)"
+        )
+        await raw.commit()
+    database = Database(path)
+    await database.connect()
+    try:
+        async with database.conn.execute(
+            "SELECT player_id, proficiency_json FROM match_participants ORDER BY player_id"
+        ) as cur:
+            rows = {r[0]: r[1] for r in await cur.fetchall()}
+        assert json.loads(rows[1]) == {
+            "TOP": 5,
+            "JUNGLE": None,
+            "MID": 4,  # the admin's value wins over the declared one
+            "ADC": None,
+            "SUPPORT": None,
+        }
+        assert json.loads(rows[2]) == dict.fromkeys(("TOP", "JUNGLE", "MID", "ADC", "SUPPORT"))
+    finally:
+        await database.close()

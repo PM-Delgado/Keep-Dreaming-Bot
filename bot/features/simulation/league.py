@@ -113,6 +113,14 @@ class League:
         everyone = list(self.players.values())
         return spearman([p.h.mu for p in everyone], [p.sim.true_mu for p in everyone])
 
+    def _role_losses(
+        self, ids: Sequence[int], role_of: dict[int, str], by_id: dict[int, SimPlayer]
+    ) -> list[float] | None:
+        """What the role-aware update would subtract per player (None when it is off)."""
+        if not self.engine.params.role_aware:
+            return None
+        return [self.engine.params.loss_for(by_id[i].proficiency.get(role_of[i])) for i in ids]
+
     def play_lobby(self, lobby_ids: Sequence[int] | None = None) -> MatchRecord:
         ids = list(lobby_ids) if lobby_ids else self.rng.sample(sorted(self.players), 10)
         believed = []
@@ -130,8 +138,12 @@ class League:
         blue_ids = tuple(s.player_id for s in proposal.blue)
         red_ids = tuple(s.player_id for s in proposal.red)
         win_ids, lose_ids = (blue_ids, red_ids) if winner == "blue" else (red_ids, blue_ids)
+        role_of = {s.player_id: s.role for s in (*proposal.blue, *proposal.red)}
         new_w, new_l = self.engine.update(
-            [self.players[i].h for i in win_ids], [self.players[i].h for i in lose_ids]
+            [self.players[i].h for i in win_ids],
+            [self.players[i].h for i in lose_ids],
+            self._role_losses(win_ids, role_of, by_id),
+            self._role_losses(lose_ids, role_of, by_id),
         )
         change: dict[int, float] = {}
         for pid, new, won in (

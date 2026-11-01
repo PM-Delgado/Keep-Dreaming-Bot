@@ -5,8 +5,8 @@ the engine parameters and the ladder, so every cache can be rebuilt at any time.
 deliberately *not* inputs: they only affect E and the creation of seed events.
 """
 
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from bot.features.ratings.engine import Rating, RatingEngine
@@ -34,6 +34,9 @@ class MatchIn:
     winner: str  # blue | red
     blue: tuple[int, ...]
     red: tuple[int, ...]
+    # player -> proficiency on the role they were assigned (None = unknown) as recorded when the
+    # game started. A player missing here has no record; only used when the engine is role-aware.
+    role_proficiency: Mapping[int, int | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -94,9 +97,18 @@ def apply_match(
         raise ReplayError(f"Match {match.id} involves players without a rating: {missing}.")
 
     winners, losers = (match.blue, match.red) if match.winner == "blue" else (match.red, match.blue)
+
+    def losses(team: tuple[int, ...]) -> list[float] | None:
+        if not engine.params.role_aware:
+            return None
+        known = match.role_proficiency
+        return [engine.params.loss_for(known[p]) if p in known else 0.0 for p in team]
+
     new_w, new_l = engine.update(
         [Rating(state[p].mu, state[p].sigma) for p in winners],
         [Rating(state[p].mu, state[p].sigma) for p in losers],
+        losses(winners),
+        losses(losers),
     )
     rows: list[HistoryRow] = []
     for player_id, new in (*zip(winners, new_w, strict=True), *zip(losers, new_l, strict=True)):

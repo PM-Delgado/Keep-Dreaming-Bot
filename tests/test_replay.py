@@ -138,3 +138,48 @@ def test_unreplayable_matches_raise(bad, message):
 def test_unknown_event_kind_raises():
     with pytest.raises(ReplayError, match="Unknown rating event kind"):
         replay([RatingEventIn(1, 1, "bogus", 25, 8, T0)], [])
+
+
+# --- role-aware matches ----
+
+
+def aware_engine():
+    return RatingEngine(EngineParams(role_aware=True))
+
+
+def test_role_proficiency_is_ignored_while_the_engine_is_not_role_aware():
+    events = seed_events(26.0, 2.0)
+    blind = replay(events, [match(1, "blue")])
+    with_profile = MatchIn(
+        1, T0 + timedelta(hours=1), "blue", BLUE, RED, dict.fromkeys(range(1, 11), 1)
+    )
+    assert replay(events, [with_profile]).players == blind.players
+
+
+def test_role_aware_replay_uses_the_recorded_proficiency():
+    events = seed_events(26.0, 2.0)
+    # Player 6 (red, the losers) was on a role at proficiency 1: his loss was expected.
+    prof = {**dict.fromkeys(range(1, 11), 5), 6: 1}
+    game = MatchIn(1, T0 + timedelta(hours=1), "blue", BLUE, RED, prof)
+    plain = replay(events, [game], RatingEngine()).players
+    aware = replay(events, [game], aware_engine()).players
+    assert aware[6].mu > plain[6].mu  # charged less for the loss
+    assert aware[1].mu < plain[1].mu  # and the winners gained a little less
+    assert aware[2].mu != plain[2].mu
+
+
+def test_players_without_a_record_are_treated_as_no_role_effect():
+    events = seed_events(26.0, 2.0)
+    plain = replay(events, [match(1, "red")], RatingEngine()).players
+    assert replay(events, [match(1, "red")], aware_engine()).players == plain
+
+
+def test_role_aware_replay_is_deterministic():
+    events = seed_events(26.0, 2.0)
+    prof = {**dict.fromkeys(range(1, 11), 3), 4: None, 9: 1}
+    matches = [
+        MatchIn(i, T0 + timedelta(hours=i), "blue" if i % 3 else "red", BLUE, RED, prof)
+        for i in range(1, 8)
+    ]
+    first = replay(events, matches, aware_engine())
+    assert replay(events, list(reversed(matches)), aware_engine()) == first

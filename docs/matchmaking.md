@@ -84,6 +84,27 @@ Staleness does **not** change E.
   game replays everything inside the same database transaction; 500 games take about 80 ms.
   `/admin rating recompute` does the same on demand.
 
+### The role-aware update (built, switched off)
+
+Today the update above sees only H: it does not know which role each player got. The balancer,
+though, predicts with each player's strength *on the role they play* (E minus the loss for their
+proficiency there, see [building teams](#building-teams)). So a team with several autofilled
+strong players is predicted even but has a high raw H sum; if it loses, the update reads an upset.
+
+`EngineParams.role_aware` (default `False`) fixes the mismatch: the update runs on `H - loss` and
+only the *change* is applied to H, so an autofilled player is not charged for a role effect the
+balancer already expected, and a win while off-role earns a little more credit. The loss comes from
+the proficiency stored with the game (`match_participants.proficiency_json`) on the role the
+balancer *assigned* (an admin's `played_role` note never changes a rating). The table is the
+balancer's (`DEFAULT_PROF_LOSS`, one definition), so they cannot drift apart.
+
+It is off because, on the first eight real games, it changed no one's H by more than 0.09 and no
+tier: the balancer already makes games close under the role-adjusted numbers, so the two views differ
+by only a few points of team strength. It also ties H's history to the loss table (retuning the table
+would replay everything, and bump `algo_version`). Turn it on only if the
+[backtest](simulations.md#backtest-the-real-games) shows a gain. With it off nothing changes, and
+`algo_version` stays the same (no replay at startup).
+
 ## The visible rank
 
 The visible rank is derived from **H** (not E, not R), so it reflects performance in our games.
@@ -198,6 +219,12 @@ Players in a started game cannot join another lobby until its result is in. Sign
 |---|---|
 | `rating_events` (seeds, admin adjustments), `rank_signals`, `matches` + `match_participants` + `match_audit`, `player_roles`, Riot accounts and role games | `ratings`, `rating_history` (replay of the left column), E (computed on demand), the visible rank |
 
+`match_participants` freezes what the balancer saw for each player: H, sigma, E, R and, since
+migration 16, the whole **role profile** (`proficiency_json`: proficiency 1-5 per role, null =
+unknown, as the balancer used it, Riot estimates included). Games from before that migration were
+filled from the players' declared/admin values at the time of the migration, which is an
+approximation. The profile is the evidence the backtest and the role-aware update need.
+
 Changing a tunable (`d_up`, the ladder, ...) never rewrites history: E and the visible rank are
 recomputed from the stored inputs. Changing how H evolves (`beta`, `tau`) bumps the algorithm
 version, and the caches are replayed at startup.
@@ -214,6 +241,8 @@ version, and the caches are replayed at startup.
 | `rank_stale_after_days` | 30 | `MatchmakingParams` | flag only |
 | `form_weight` (+ `form_games`, `form_cap`) | 0 (off), 5, 2.0 | `MatchmakingParams` | last-5-games form signal; tested, no gain |
 | `beta`, `tau` | 4.17, 0.083 | `EngineParams` | OpenSkill |
+| `role_aware` (+ `role_loss`, `unknown_role_loss`) | off; the balancer's loss table, 1.0 | `EngineParams` | update on role-adjusted strengths ([above](#the-role-aware-update-built-switched-off)) |
+| `prof_loss`, `unknown_prof_loss` | 0 / 0.3 / 0.8 / 1.8 / 3.0 (proficiency 5..1), 1.0 | `ratings/params.py` (`DEFAULT_PROF_LOSS`) | strength lost on a weaker role; the one table used by the balancer and the role-aware update |
 | `placement_games` | 5 | `LadderConfig` | games before a tier is shown |
 | `demotion_buffer`, `division_width` | 0.33, 1.0 | `LadderConfig` | hysteresis, division size |
 | `w_role`, `w_lane`, `w_topk`, `w_spread` | 0.015, 0.004, 0.005, 0.01 | `BalanceParams` | balancer score terms |
@@ -283,6 +312,20 @@ A window of 3 or 10 games gave the same picture. The signal is never clearly bet
 is usually a little worse: one balanced game is nearly a coin flip, so five of them say very little
 about someone's form, and the adjustment mostly adds noise. It stays at `form_weight = 0`. The code
 is small and tested, so a better signal can reuse it.
+
+### What the first real games say (8 games, a hint, not a result)
+
+`python -m bot.features.backtest` replays the real games under other settings
+([how](simulations.md#backtest-the-real-games)). On the first eight confirmed scrims, scored on the
+prediction made before each game (coin flip = 0.693 log-loss, today = 0.676):
+
+* A **bigger role loss in the prediction** fits better: x2 gives 0.622 and x3 0.572 (better in 7 of 8
+  games). The caveat is large: the same 20 players, and red happened to win 7 of 8, which also
+  happens to be the side with the more comfortable roles. Re-run after about 15 more games before
+  touching the table.
+* The **role-aware update** changes nothing measurable (0.6745), and a **sigma floor** (faster H)
+  does not help (0.680-0.684): speed and noise grow together, so the signal-to-noise ratio of a
+  rating hardly moves; only more or better information does.
 
 ### Ideas to test next
 
