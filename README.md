@@ -233,6 +233,7 @@ bot/
     stats/         read-only /history, /stats and /leaderboard from confirmed games
     simulation/    scenarios, simulated seasons and the tuning lab (not loaded by the bot)
     roster/        roster file, seeding, test games, reset (not loaded by the bot)
+    backtest/      replays the real games under other settings (not loaded by the bot)
 tests/             pytest, in-memory SQLite
 tools/             dev-only scripts and the roster file template
 docs/              documentation
@@ -245,6 +246,7 @@ Each feature keeps Discord out of its rules: `service.py` holds the logic, `repo
 ```bash
 python -m bot.features.simulation scenario all                     # how the balancer lands fixed lobbies
 python -m bot.features.simulation season --players 14 --games 40   # a whole simulated season
+python -m bot.features.backtest --db <snapshot>                    # the real games under other settings
 ```
 
 ## 📚 Documentation

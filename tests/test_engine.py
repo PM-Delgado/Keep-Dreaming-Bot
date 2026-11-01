@@ -61,3 +61,61 @@ def test_win_probability_favours_the_stronger_team():
 def test_algo_version_changes_with_engine_params():
     assert algo_version() != algo_version(EngineParams(beta=5.0))
     assert algo_version().startswith("openskill-")
+
+
+# --- role-aware update ----
+
+
+def test_no_losses_or_all_zero_losses_is_exactly_the_plain_update():
+    plain = ENGINE.update(team(26, 2.0), team(24, 2.0))
+    assert ENGINE.update(team(26, 2.0), team(24, 2.0), None, None) == plain
+    zeros = [0.0] * 5
+    assert ENGINE.update(team(26, 2.0), team(24, 2.0), zeros, zeros) == plain
+
+
+def test_a_loss_on_the_losing_side_is_expected_so_it_costs_less():
+    # The same two teams; the losers' strongest player lost 3 points on the role he played.
+    plain_w, plain_l = ENGINE.update(team(26, 2.0), team(26, 2.0))
+    aware_w, aware_l = ENGINE.update(team(26, 2.0), team(26, 2.0), None, [3.0, 0, 0, 0, 0])
+    # With him weaker the loss was less of a surprise: his rating drops less, winners gain less.
+    assert aware_l[0].mu > plain_l[0].mu
+    assert aware_w[0].mu < plain_w[0].mu
+    # The change is applied to his real rating: it stays near 26, not near 23.
+    assert 25 < aware_l[0].mu < 26
+
+
+def test_autofilled_winners_gain_more():
+    plain_w, _ = ENGINE.update(team(26, 2.0), team(26, 2.0))
+    aware_w, _ = ENGINE.update(team(26, 2.0), team(26, 2.0), [3.0, 3.0, 0, 0, 0], None)
+    assert aware_w[0].mu > plain_w[0].mu  # won although weaker on the role: more credit
+
+
+def test_wrong_number_of_losses_is_refused():
+    with pytest.raises(ValueError):
+        ENGINE.update(team(25), team(25), [0.0], None)
+
+
+def test_role_aware_changes_the_algo_version_only_when_on():
+    off = algo_version(EngineParams())
+    on = algo_version(EngineParams(role_aware=True))
+    assert on != off and on.startswith(off)
+    assert algo_version(EngineParams(role_aware=True)) == on  # stable
+    assert (
+        algo_version(EngineParams(role_aware=True, role_loss={5: 0, 4: 1, 3: 2, 2: 3, 1: 4})) != on
+    )
+    # A different table with the feature off does not change the version.
+    assert algo_version(EngineParams(role_loss={5: 0, 4: 1, 3: 2, 2: 3, 1: 4})) == off
+
+
+def test_loss_for_uses_the_table_and_the_unknown_value():
+    params = EngineParams()
+    assert params.loss_for(5) == 0.0
+    assert params.loss_for(1) == 3.0
+    assert params.loss_for(None) == params.unknown_role_loss == 1.0
+
+
+def test_the_balancer_and_the_update_share_one_loss_table():
+    from bot.features.balance.model import BalanceParams
+
+    assert dict(BalanceParams().prof_loss) == dict(EngineParams().role_loss)
+    assert BalanceParams().unknown_prof_loss == EngineParams().unknown_role_loss

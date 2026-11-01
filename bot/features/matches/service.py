@@ -10,6 +10,7 @@ same database transaction, so a result and the ratings it produced appear togeth
 Replaying everything is cheap at this scale and cannot drift from an incremental update.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -133,6 +134,11 @@ class MatchService:
             for slot in slots:
                 inspection = await self.ratings.inspect(slot.player_id)
                 rank = inspection.resolution.rank
+                # The same effective profile the balancer used, frozen with the rest.
+                profile = {
+                    line.role: line.proficiency.value
+                    for line in await self.players.role_lines(slot.player_id)
+                }
                 people.append(
                     ParticipantRow(
                         0,
@@ -144,6 +150,7 @@ class MatchService:
                         inspection.estimate.mu,
                         inspection.estimate.sigma,
                         rank.mu(self.ratings.params) if rank else None,
+                        proficiency_json=json.dumps(profile),
                     )
                 )
         return await self.repo.create(lobby.id, lobby.guild_id, blue_win_prob, self.clock(), people)

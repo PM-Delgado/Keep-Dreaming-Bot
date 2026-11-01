@@ -1,5 +1,6 @@
 """SQL for matches. Status changes are compare-and-set UPDATEs, like lobbies."""
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -56,10 +57,23 @@ class ParticipantRow:
     stats_set_by: int | None = None
     stats_validated_by: int | None = None
     played_role: str | None = None  # set when it differs from the role the balancer assigned
+    # M-backtest: the player's proficiency per role when the game started (JSON, null = unknown).
+    proficiency_json: str | None = None
 
     @property
     def has_stats(self) -> bool:
         return self.champion is not None
+
+    @property
+    def proficiency(self) -> dict[str, int | None] | None:
+        """Role -> proficiency (None = unknown) at game start; None when nothing was recorded."""
+        return json.loads(self.proficiency_json) if self.proficiency_json else None
+
+    @property
+    def assigned_proficiency(self) -> tuple[bool, int | None]:
+        """(recorded, proficiency on the role the balancer assigned)."""
+        profile = self.proficiency
+        return (False, None) if profile is None else (True, profile.get(self.role))
 
 
 @dataclass(frozen=True)
@@ -81,7 +95,7 @@ _COLUMNS = (
 _PARTICIPANT_COLUMNS = (
     "match_id, player_id, side, role, h_mu_before, h_sigma_before, est_mu, est_sigma, rank_mu,"
     " champion, kills, deaths, assists, stats_status, stats_set_by, stats_validated_by,"
-    " played_role"
+    " played_role, proficiency_json"
 )
 # Columns a transition may set, with the conversion applied to the value.
 _SETTABLE = {
@@ -146,7 +160,8 @@ class MatchRepository:
         match_id = cur.lastrowid or 0
         await self.db.conn.executemany(
             "INSERT INTO match_participants (match_id, player_id, side, role, h_mu_before,"
-            " h_sigma_before, est_mu, est_sigma, rank_mu) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " h_sigma_before, est_mu, est_sigma, rank_mu, proficiency_json)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     match_id,
@@ -158,6 +173,7 @@ class MatchRepository:
                     p.est_mu,
                     p.est_sigma,
                     p.rank_mu,
+                    p.proficiency_json,
                 )
                 for p in participants
             ],
@@ -356,6 +372,13 @@ class MatchRepository:
                     winner,
                     tuple(p.player_id for p in people if p.side == "blue"),
                     tuple(p.player_id for p in people if p.side == "red"),
+                    # The assigned role, not `played_role`: an admin's note on who really played
+                    # what never changes a rating.
+                    {
+                        p.player_id: p.assigned_proficiency[1]
+                        for p in people
+                        if p.assigned_proficiency[0]
+                    },
                 )
             )
         return result
