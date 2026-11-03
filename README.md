@@ -70,6 +70,7 @@ and the docs are in English.
   Raw ratings are never shown to players.
 - **Rivalries and synergy.** `/rivalry` compares two players: their games against each other, their games
   on the same team and the games they shared, from the confirmed games only.
+
 The Scrims also use the [Riot integration](#-riot-integration) below: a linked account seeds the rating
 from the player's Solo/Duo rank and gives an estimate of their role experience.
 
