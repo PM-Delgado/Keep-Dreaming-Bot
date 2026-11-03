@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from bot.features.champions.service import ChampionService
+from bot.features.icons.pair_avatar import PairAvatars
 from bot.features.icons.roles import RoleIconService
 from bot.features.icons.tiers import TierIconService
 from bot.features.players.service import NOT_REGISTERED, PlayerError
@@ -205,6 +206,7 @@ class Riot(commands.Cog):
         self.icons = icons  # role icons
         self.champions = champions  # champion names and icons
         self.tiers = tiers  # rank (tier) icons
+        self.pair_avatars = PairAvatars()  # the half-and-half /riot duo picture
 
     riot = app_commands.Group(name="riot", description="Contas Riot ligadas aos jogadores.")
 
@@ -267,8 +269,8 @@ class Riot(commands.Cog):
     async def _before_feed_poller(self) -> None:
         await self.bot.wait_until_ready()
 
-    async def _avatar_url(self, discord_id: int) -> str | None:
-        """The player's Discord avatar, or None when the member cannot be reached."""
+    async def _member(self, discord_id: int) -> discord.Member | None:
+        """The server member, or None when they cannot be reached."""
         guild = self.bot.get_guild(self.bot.settings.guild_id)
         if guild is None:
             return None
@@ -278,7 +280,12 @@ class Riot(commands.Cog):
                 member = await guild.fetch_member(discord_id)
             except discord.HTTPException:
                 return None
-        return member.display_avatar.url
+        return member
+
+    async def _avatar_url(self, discord_id: int) -> str | None:
+        """The player's Discord avatar, or None when the member cannot be reached."""
+        member = await self._member(discord_id)
+        return member.display_avatar.url if member else None
 
     async def post_card(self, item: FeedItem) -> bool:
         """Post one game's card in the feed channel. False (the game stays pending, to be tried
@@ -545,14 +552,18 @@ class Riot(commands.Cog):
 
     async def _duo_message(
         self, interaction: discord.Interaction, a_id: int, b_id: int, tab: str, owner_id: int
-    ) -> dict[str, Any]:
-        """Keyword arguments for send/edit: the embed of one tab and its buttons (none when the
-        two share no stored game). Raises `DuoError`."""
+    ) -> tuple[dict[str, Any], discord.File | None]:
+        """Keyword arguments for send/edit (the embed of one tab and its buttons, none when the
+        two share no stored game) and the thumbnail file to attach, if one was made.
+        Raises `DuoError`."""
         report = await self.service.duo(a_id, b_id)
         stats = report.stats
         ids = sorted(set(champion_ids(stats)))
         names = await self.champions.names(ids) if self.champions else {}
         icons = await self.champions.icon_markup(ids) if self.champions else {}
+        thumbnail, file = await self.pair_avatars.thumbnail(
+            await self._member(report.a.discord_id), await self._member(report.b.discord_id)
+        )
         embed = build_duo_embed(
             report.a.nickname,
             report.b.nickname,
@@ -562,12 +573,12 @@ class Riot(commands.Cog):
             self.icons.markup() if self.icons else {},
             icons,
             names,
-            await self._avatar_url(report.a.discord_id),
+            thumbnail,
         )
         message: dict[str, Any] = {"embed": embed}
         if stats.games:
             message["view"] = duo_view(tab, a_id, b_id, owner_id)
-        return message
+        return message, file
 
     @riot.command(
         name="duo",
@@ -585,7 +596,7 @@ class Riot(commands.Cog):
     ) -> None:
         first, second = (user, other) if other else (interaction.user, user)
         try:
-            message = await self._duo_message(
+            message, file = await self._duo_message(
                 interaction, first.id, second.id, TAB_SUMMARY, interaction.user.id
             )
         except DuoError as exc:
@@ -594,8 +605,9 @@ class Riot(commands.Cog):
                 self._duo_refusal_text(interaction, exc), ephemeral=True
             )
             return
+        extra: dict[str, Any] = {"file": file} if file else {}
         await interaction.response.send_message(
-            allowed_mentions=discord.AllowedMentions.none(), **message
+            allowed_mentions=discord.AllowedMentions.none(), **message, **extra
         )
 
     async def flip_duo(
@@ -604,7 +616,9 @@ class Riot(commands.Cog):
         """A tab button: the owner flips the public message; anybody else gets a private copy."""
         owner = interaction.user.id == owner_id
         try:
-            message = await self._duo_message(interaction, a_id, b_id, tab, interaction.user.id)
+            message, file = await self._duo_message(
+                interaction, a_id, b_id, tab, interaction.user.id
+            )
         except DuoError as exc:
             log_refusal(interaction, exc)
             await interaction.response.send_message(
@@ -612,10 +626,16 @@ class Riot(commands.Cog):
             )
             return
         if owner:
-            await interaction.response.edit_message(**message)
+            # The picture is attached again on every flip; `attachments` replaces the old one
+            # (and is empty when there is none, so a stale picture never lingers).
+            await interaction.response.edit_message(**message, attachments=[file] if file else [])
         else:
+            extra: dict[str, Any] = {"file": file} if file else {}
             await interaction.response.send_message(
-                ephemeral=True, allowed_mentions=discord.AllowedMentions.none(), **message
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+                **message,
+                **extra,
             )
 
     @riot.command(name="leaderboard", description="Classificação Solo/Duo das contas principais.")

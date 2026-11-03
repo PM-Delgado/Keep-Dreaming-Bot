@@ -7,6 +7,7 @@ import discord
 import pytest
 import pytest_asyncio
 from lobby_fakes import ADMIN, GUILD, LobbyStack, sides_of, start_game
+from test_pair_avatar import RED, YELLOW, avatars_of, decode
 
 from bot.features.players.repository import Player
 from bot.features.players.service import NOT_REGISTERED
@@ -18,7 +19,6 @@ from bot.features.stats.pair_render import (
     SMALL_SAMPLE,
     build_pair_embed,
     champion_ids,
-    thumbnail_player,
 )
 from bot.features.stats.pair_views import PAIR_ID, PairTabButton, pair_view
 from bot.features.stats.pairs import (
@@ -256,12 +256,10 @@ def test_the_games_tab_says_when_it_is_cut():
     assert "Últimos 10 de 12 jogos:" in (embed_for(pair, TAB_GAMES).description or "")
 
 
-def test_names_are_escaped_and_the_avatar_goes_to_whoever_leads():
+def test_names_are_escaped_and_the_thumbnail_is_whatever_url_is_given():
     star = build_pair(player(1, "*A*"), JOAO, *games_between([("against", True, "MID", "TOP")]))
     assert "\\*A\\*" in (embed_for(star, TAB_H2H).description or "")
     ahead = pair_for([("against", False, "MID", "TOP")] * 2)
-    assert thumbnail_player(ahead, TAB_H2H) is JOAO
-    assert thumbnail_player(ahead, TAB_SYNERGY) is PEDRO
     assert build_pair_embed(
         ahead, TAB_H2H, NOW, {}, {}, {}, "https://cdn.invalid/j.png"
     ).thumbnail.url
@@ -471,3 +469,53 @@ def test_the_cog_registers_the_tab_buttons(stack):
     asyncio.run(cog.cog_unload())
     assert bot.items == []
     assert isinstance(discord.Embed(), discord.Embed)
+
+
+# --- the half-and-half picture ----
+
+
+def reachable(avatars: dict) -> dict:
+    return {i: SimpleNamespace(display_avatar=a) for i, a in avatars.items()}
+
+
+async def test_rivalry_carries_the_half_and_half_picture_of_both_players(stack, cog):
+    await play(stack)
+    ix = FakeInteraction(1, members=reachable(avatars_of([])))
+    await cog.rivalry.callback(cog, ix, member(2, "Dois"))  # type: ignore[arg-type]
+    reply = ix.sent[0]
+    assert reply["embed"].thumbnail.url == "attachment://pair.png"
+    assert reply["file"].filename == "pair.png"
+    picture = decode(reply["file"].fp.read())
+    assert picture.getpixel((10, 128)) == RED  # the first player's left half
+    assert picture.getpixel((246, 128)) == YELLOW  # the second player's right half
+
+
+async def test_the_picture_does_not_depend_on_the_tab_or_on_who_leads(stack, cog):
+    await play(stack)
+    for tab in (TAB_H2H, TAB_SYNERGY, TAB_GAMES):
+        ix = FakeInteraction(1, members=reachable(avatars_of([])))
+        await cog.flip_pair(ix, tab, 1, 2, 1)  # type: ignore[arg-type]
+        assert ix.edited[0]["embed"].thumbnail.url == "attachment://pair.png"
+
+
+async def test_a_flip_reattaches_the_picture_and_a_guest_gets_a_private_copy_with_it(stack, cog):
+    await play(stack)
+    members = reachable(avatars_of([]))
+    owner = FakeInteraction(1, members=members)
+    await cog.flip_pair(owner, TAB_GAMES, 1, 2, 1)  # type: ignore[arg-type]
+    assert [f.filename for f in owner.edited[0]["attachments"]] == ["pair.png"]
+    guest = FakeInteraction(5, members=members)
+    await cog.flip_pair(guest, TAB_SYNERGY, 1, 2, 1)  # type: ignore[arg-type]
+    assert guest.sent[0]["ephemeral"] is True and guest.sent[0]["file"].filename == "pair.png"
+
+
+async def test_without_reachable_members_there_is_no_picture_and_a_flip_clears_the_old_one(
+    stack, cog
+):
+    await play(stack)
+    ix = FakeInteraction(1)
+    await cog.flip_pair(ix, TAB_GAMES, 1, 2, 1)  # type: ignore[arg-type]
+    assert ix.edited[0]["attachments"] == [] and ix.edited[0]["embed"].thumbnail.url is None
+    first = FakeInteraction(1)
+    await cog.rivalry.callback(cog, first, member(2, "Dois"))  # type: ignore[arg-type]
+    assert "file" not in first.sent[0]

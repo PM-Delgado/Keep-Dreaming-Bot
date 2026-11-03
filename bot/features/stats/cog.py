@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.features.champions.service import ChampionService
+from bot.features.icons.pair_avatar import PairAvatars
 from bot.features.icons.roles import RoleIconService
 from bot.features.players.repository import Player
 from bot.features.players.service import NOT_REGISTERED, PlayerError
@@ -16,7 +17,6 @@ from bot.features.players.text import tier_color
 from bot.features.stats.pair_render import (
     build_pair_embed,
     champion_ids,
-    thumbnail_player,
 )
 from bot.features.stats.pair_views import PairTabButton, pair_view
 from bot.features.stats.pairs import initial_tab
@@ -67,6 +67,7 @@ class Stats(commands.Cog):
         self.service = service
         self.champions = champions
         self.icons = icons  # role icons; None or empty means role names only
+        self.pair_avatars = PairAvatars()  # the half-and-half /rivalry picture
 
     async def cog_load(self) -> None:
         # One registered item answers every /rivalry tab button, also after a restart.
@@ -87,8 +88,8 @@ class Stats(commands.Cog):
         """The side bar has the colour of the player's League Solo/Duo tier, as on the profile."""
         return tier_color((await self.service.ratings.resolve(player.id)).rank)
 
-    async def _avatar(self, guild: discord.Guild | None, player: Player) -> str | None:
-        """The Discord avatar of a player (the board's leader), or None if not reachable."""
+    async def _member(self, guild: discord.Guild | None, player: Player) -> discord.Member | None:
+        """The server member of a player, or None if not reachable."""
         if guild is None:
             return None
         member = guild.get_member(player.discord_id)
@@ -97,7 +98,12 @@ class Stats(commands.Cog):
                 member = await guild.fetch_member(player.discord_id)
             except discord.HTTPException:
                 return None
-        return member.display_avatar.url
+        return member
+
+    async def _avatar(self, guild: discord.Guild | None, player: Player) -> str | None:
+        """The Discord avatar of a player (the board's leader), or None if not reachable."""
+        member = await self._member(guild, player)
+        return member.display_avatar.url if member else None
 
     @app_commands.command(
         name="history", description="Mostra os últimos jogos de Scrims de um jogador."
@@ -172,16 +178,22 @@ class Stats(commands.Cog):
         b_id: int,
         tab: str | None,
         owner_id: int,
-    ) -> dict[str, Any]:
-        """Keyword arguments for send/edit: the embed of one tab and its buttons (none when the
-        two never shared a game). Raises `PairError`."""
+    ) -> tuple[dict[str, Any], discord.File | None]:
+        """Keyword arguments for send/edit (the embed of one tab and its buttons, none when the
+        two never shared a game) and the picture to attach, half of each player's avatar.
+        Raises `PairError`."""
         pair = await self.service.pair(guild_id, a_id, b_id)
         tab = tab or initial_tab(pair)
         icons, names = await self._champion_maps(champion_ids(pair))
-        avatar = await self._avatar(interaction.guild, thumbnail_player(pair, tab))
-        embed = build_pair_embed(pair, tab, datetime.now(UTC), self._roles(), icons, names, avatar)
+        thumbnail, file = await self.pair_avatars.thumbnail(
+            await self._member(interaction.guild, pair.a),
+            await self._member(interaction.guild, pair.b),
+        )
+        embed = build_pair_embed(
+            pair, tab, datetime.now(UTC), self._roles(), icons, names, thumbnail
+        )
         view = pair_view(tab, a_id, b_id, owner_id) if pair.total else None
-        return {"embed": embed, "view": view}
+        return {"embed": embed, "view": view}, file
 
     @app_commands.command(
         name="rivalry",
@@ -202,7 +214,7 @@ class Stats(commands.Cog):
             return
         first, second = (user, other) if other else (interaction.user, user)
         try:
-            message = await self._pair_message(
+            message, file = await self._pair_message(
                 interaction, interaction.guild_id, first.id, second.id, None, interaction.user.id
             )
         except PairError as exc:
@@ -211,8 +223,9 @@ class Stats(commands.Cog):
                 self._refusal_text(interaction, exc), ephemeral=True
             )
             return
+        extra: dict[str, Any] = {"file": file} if file else {}
         await interaction.response.send_message(
-            allowed_mentions=NO_MENTIONS, **_without_none(message)
+            allowed_mentions=NO_MENTIONS, **_without_none(message), **extra
         )
 
     async def flip_pair(
@@ -223,7 +236,7 @@ class Stats(commands.Cog):
             return
         owner = interaction.user.id == owner_id
         try:
-            message = await self._pair_message(
+            message, file = await self._pair_message(
                 interaction, interaction.guild_id, a_id, b_id, tab, interaction.user.id
             )
         except PairError as exc:
@@ -233,10 +246,13 @@ class Stats(commands.Cog):
             )
             return
         if owner:
-            await interaction.response.edit_message(**message)
+            # The picture is attached again on every flip; `attachments` replaces the old one
+            # (and is empty when there is none, so a stale picture never lingers).
+            await interaction.response.edit_message(**message, attachments=[file] if file else [])
         else:
+            extra: dict[str, Any] = {"file": file} if file else {}
             await interaction.response.send_message(
-                ephemeral=True, allowed_mentions=NO_MENTIONS, **_without_none(message)
+                ephemeral=True, allowed_mentions=NO_MENTIONS, **_without_none(message), **extra
             )
 
     @app_commands.command(name="leaderboard", description="Classificações do grupo.")

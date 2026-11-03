@@ -38,11 +38,6 @@ TAB_COLORS = {
 }
 NOTHING_SHARED = "Ainda não há jogos ranked Solo/Duo guardados na mesma equipa."
 SMALL_SAMPLE = f"-# Amostra pequena: percentagens a partir de {MIN_PERCENT} jogos."
-BASIS = (
-    "-# Baseado em jogos ranked Solo/Duo guardados em que estavam na mesma equipa "
-    "(não prova que jogaram em duo)."
-)
-INDICATIVE = "-# Comparação apenas indicativa: escolher o parceiro não é aleatório."
 
 
 def _escape(text: str) -> str:
@@ -129,7 +124,8 @@ def _compare_line(name: str, other: str, compare: WithWithout) -> str:
 
 
 def _notes(stats: DuoStats) -> list[str]:
-    notes = [BASIS]
+    """Only what is wrong with the data right now; nothing when everything is as expected."""
+    notes: list[str] = []
     if stats.syncing:
         names = ", ".join(stats.syncing)
         what = "da conta" if len(stats.syncing) == 1 else "das contas"
@@ -140,9 +136,6 @@ def _notes(stats: DuoStats) -> list[str]:
             f"-# {stats.ambiguous} jogo{plural} ignorado{plural}: "
             "duas contas do mesmo jogador no mesmo jogo."
         )
-    if stats.coverage is not None:
-        later = "; jogos anteriores podem estar incompletos" if stats.before_coverage else ""
-        notes.append(f"-# Histórico completo desde {_date(stats.coverage)}{later}.")
     return notes
 
 
@@ -179,7 +172,7 @@ def _summary_lines(
         if compare is not None and compare.shown
     ]
     if compares and stats.coverage is not None:
-        lines += ["", f"**Com e sem** (desde {_date(stats.coverage)})", *compares, INDICATIVE]
+        lines += ["", f"**Com e sem** (desde {_date(stats.coverage)})", *compares]
     return lines
 
 
@@ -346,5 +339,6 @@ def build_duo_embed(
     embed = discord.Embed(color=TAB_COLORS[tab])
     if avatar_url:
         embed.set_thumbnail(url=avatar_url)
-    embed.description = "\n".join([heading, "", *body, "", *_notes(stats)])
+    notes = _notes(stats)
+    embed.description = "\n".join([heading, "", *body, *(["", *notes] if notes else [])])
     return embed

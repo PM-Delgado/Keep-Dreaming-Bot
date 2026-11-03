@@ -55,6 +55,11 @@ either account is unlinked (or the player leaves) the shared game is no longer s
 history sync drops it from the other account. `/riot list` counts and the champion pool can therefore
 include a few games beyond 100; the role estimate still reads the newest 100.
 
+**The `/riot duo` and `/rivalry` picture.** It is made from the two players' **Discord** avatars (not Riot data):
+the bot downloads them from Discord's CDN, joins half of each into one PNG with Pillow and attaches
+it to the message. Nothing is written to the database or disk; the finished pictures (at most 32)
+are kept in memory until the bot restarts.
+
 **Teammates on the post-game card.** The card is built from the full match, which lists the other nine
 players. The PUUIDs of the players on the same team are compared with the linked accounts to name
 group members in the title (`Ganhou (Duo c/ João)`). They are looked up on the fly: **no PUUID of a
