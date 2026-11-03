@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -13,9 +13,28 @@ from bot.features.icons.roles import RoleIconService
 from bot.features.players.repository import Player
 from bot.features.players.service import NOT_REGISTERED, PlayerError
 from bot.features.players.text import tier_color
-from bot.features.stats.render import build_board_embed, build_history_embed, build_stats_embed
+from bot.features.stats.pair_render import (
+    build_pair_embed,
+    champion_ids,
+    thumbnail_player,
+)
+from bot.features.stats.pair_views import PairTabButton, pair_view
+from bot.features.stats.pairs import initial_tab
+from bot.features.stats.render import (
+    build_board_embed,
+    build_history_embed,
+    build_stats_embed,
+    escape,
+)
 from bot.features.stats.repository import StatsRepository
-from bot.features.stats.service import KDA, MIN_BOARD_GAMES, RANK, WIN_RATE, StatsService
+from bot.features.stats.service import (
+    KDA,
+    MIN_BOARD_GAMES,
+    RANK,
+    WIN_RATE,
+    PairError,
+    StatsService,
+)
 from bot.interaction_log import log_refusal
 
 if TYPE_CHECKING:
@@ -31,6 +50,11 @@ BOARD_CHOICES = [
 ]
 
 
+def _without_none(message: dict[str, Any]) -> dict[str, Any]:
+    """`send_message` does not accept `view=None`; a reply without buttons just omits it."""
+    return {key: value for key, value in message.items() if value is not None}
+
+
 class Stats(commands.Cog):
     def __init__(
         self,
@@ -43,6 +67,13 @@ class Stats(commands.Cog):
         self.service = service
         self.champions = champions
         self.icons = icons  # role icons; None or empty means role names only
+
+    async def cog_load(self) -> None:
+        # One registered item answers every /rivalry tab button, also after a restart.
+        self.bot.add_dynamic_items(PairTabButton)
+
+    async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(PairTabButton)
 
     def _roles(self) -> Mapping[str, str]:
         return self.icons.markup() if self.icons else {}
@@ -122,6 +153,91 @@ class Stats(commands.Cog):
             await self._color(stats.player),
         )
         await interaction.response.send_message(embed=embed, allowed_mentions=NO_MENTIONS)
+
+    def _refusal_text(self, interaction: discord.Interaction, exc: PairError) -> str:
+        """Why `/rivalry` said no: the caller is told to register, anybody else is named."""
+        if exc.discord_id is None:
+            return str(exc)
+        if exc.discord_id == interaction.user.id:
+            return NOT_REGISTERED
+        member = interaction.guild.get_member(exc.discord_id) if interaction.guild else None
+        who = f"**{escape(member.display_name)}**" if member else "Esse jogador"
+        return f"KD Scrims: {who} não está registado."
+
+    async def _pair_message(
+        self,
+        interaction: discord.Interaction,
+        guild_id: int,
+        a_id: int,
+        b_id: int,
+        tab: str | None,
+        owner_id: int,
+    ) -> dict[str, Any]:
+        """Keyword arguments for send/edit: the embed of one tab and its buttons (none when the
+        two never shared a game). Raises `PairError`."""
+        pair = await self.service.pair(guild_id, a_id, b_id)
+        tab = tab or initial_tab(pair)
+        icons, names = await self._champion_maps(champion_ids(pair))
+        avatar = await self._avatar(interaction.guild, thumbnail_player(pair, tab))
+        embed = build_pair_embed(pair, tab, datetime.now(UTC), self._roles(), icons, names, avatar)
+        view = pair_view(tab, a_id, b_id, owner_id) if pair.total else None
+        return {"embed": embed, "view": view}
+
+    @app_commands.command(
+        name="rivalry",
+        description="Compara dois jogadores: confrontos diretos e jogos na mesma equipa.",
+    )
+    @app_commands.describe(
+        user="Com quem te queres comparar.",
+        other="Um segundo jogador, para comparar os dois (por defeito, tu).",
+    )
+    async def rivalry(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        other: discord.Member | None = None,
+    ):
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Usa isto num servidor.", ephemeral=True)
+            return
+        first, second = (user, other) if other else (interaction.user, user)
+        try:
+            message = await self._pair_message(
+                interaction, interaction.guild_id, first.id, second.id, None, interaction.user.id
+            )
+        except PairError as exc:
+            log_refusal(interaction, exc)
+            await interaction.response.send_message(
+                self._refusal_text(interaction, exc), ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            allowed_mentions=NO_MENTIONS, **_without_none(message)
+        )
+
+    async def flip_pair(
+        self, interaction: discord.Interaction, tab: str, a_id: int, b_id: int, owner_id: int
+    ) -> None:
+        """A tab button: the owner flips the public message; anybody else gets a private copy."""
+        if interaction.guild_id is None:
+            return
+        owner = interaction.user.id == owner_id
+        try:
+            message = await self._pair_message(
+                interaction, interaction.guild_id, a_id, b_id, tab, interaction.user.id
+            )
+        except PairError as exc:
+            log_refusal(interaction, exc)
+            await interaction.response.send_message(
+                self._refusal_text(interaction, exc), ephemeral=True
+            )
+            return
+        if owner:
+            await interaction.response.edit_message(**message)
+        else:
+            await interaction.response.send_message(
+                ephemeral=True, allowed_mentions=NO_MENTIONS, **_without_none(message)
+            )
 
     @app_commands.command(name="leaderboard", description="Classificações do grupo.")
     @app_commands.describe(board="Qual a classificação (por defeito, o rank do grupo).")

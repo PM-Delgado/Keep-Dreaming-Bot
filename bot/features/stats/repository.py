@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from bot.db import Database
+from bot.features.matches.repository import VALIDATED
 from bot.features.ratings.repository import from_db
 
 
@@ -20,6 +21,17 @@ class GameRow:
     deaths: int | None
     assists: int | None
     stats_status: str  # none | pending | validated
+
+    @property
+    def has_stats(self) -> bool:
+        """Validated stats with every number present (the database keeps them together)."""
+        return (
+            self.stats_status == VALIDATED
+            and self.champion is not None
+            and self.kills is not None
+            and self.deaths is not None
+            and self.assists is not None
+        )
 
 
 _COLUMNS = (
