@@ -54,6 +54,9 @@ LEADERBOARD_WAIT_S = 10.0  # ... and waits this long for Riot, then shows the sa
 # The post-game feed (`poll_new_games`).
 FEED_MAX_AGE = timedelta(hours=2)  # a game that ended longer ago is never announced
 FEED_RANK_LAG = timedelta(minutes=10)  # how long to wait for Riot's rank to reflect a new game
+# Riot can change the LP of a game afterwards (a griefer refund, a penalty lifted). For this long
+# after an account's last game, a rank that moved with no new game is taken as the new baseline.
+FEED_ADJUST_WINDOW = timedelta(hours=2)
 
 CONSENT_NOTICE = (
     "**Dados da Riot: o que acontece**\n"
@@ -152,6 +155,7 @@ class PollSummary:
     skipped: int = 0  # handled without a post: remakes, games too old, games Riot dropped
     failed: int = 0  # accounts that hit an error (retried next cycle)
     waiting: int = 0  # accounts whose new game is waiting for Riot to update the rank
+    adjusted: int = 0  # accounts whose LP changed outside a game (a refund) and was taken in
     stopped: str = ""  # why the whole cycle stopped early (rejected key, rate limit)
 
 
@@ -202,6 +206,8 @@ class RiotService:
         self._syncing: set[int] = set()
         self._tasks: set[asyncio.Task[None]] = set()
         self._polling = asyncio.Lock()  # one feed cycle at a time
+        # account id -> (rank that differs from the feed baseline, when it was first seen)
+        self._rank_drift: dict[int, tuple[SoloRank | None, datetime]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -457,7 +463,9 @@ class RiotService:
         await self.sync_history(account)  # stores the new games, 1 request when there are none
         pending = await self.repo.pending_games(account.id, account.feed_since)
         if not pending:
+            await self._absorb_rank_adjustment(account, now, summary)
             return
+        self._rank_drift.pop(account.id, None)
         # Nobody is posted about once they left the server (the periodic check may not have run).
         player = await self.players.repo.get(account.player_id)
         if player is not None and not await self.players.still_member(player):
@@ -511,6 +519,48 @@ class RiotService:
                 rank.lp if rank else None,
                 now,
             )
+
+    async def _absorb_rank_adjustment(
+        self, account: AccountRow, now: datetime, summary: PollSummary
+    ) -> None:
+        """No new game, yet the rank may have moved: Riot refunded or changed the LP of a game
+        we already posted (a griefer penalty lifted a few minutes later). Without this the next
+        card would add the refund to its own LP. The new rank becomes the baseline silently once
+        it has stayed the same for FEED_RANK_LAG, so a game still on its way to our list is not
+        swallowed. Only looked at shortly after a game: that is when Riot adjusts."""
+        last = await self.repo.last_game_at(account.id)
+        if last is None or now - last > FEED_ADJUST_WINDOW:
+            self._rank_drift.pop(account.id, None)
+            return
+        rank = await self._client().solo_rank(account.puuid, account.platform, background=True)
+        if rank == account.feed_rank:
+            self._rank_drift.pop(account.id, None)
+            return
+        seen = self._rank_drift.get(account.id)
+        if seen is None or seen[0] != rank:
+            self._rank_drift[account.id] = (rank, now)  # first sight of this rank: wait
+            return
+        if now - seen[1] < FEED_RANK_LAG:
+            return
+        del self._rank_drift[account.id]
+        before = account.feed_rank
+        await self.repo.set_feed_rank(account.id, rank)
+        if account.is_main:
+            await self.repo.set_rank(
+                account.id,
+                rank.tier if rank else None,
+                rank.division if rank else None,
+                rank.lp if rank else None,
+                now,
+            )
+        summary.adjusted += 1
+        log.info(
+            "Feed: account %s moved from %s to %s with no new game (LP adjusted by Riot): "
+            "taken as the new baseline",
+            account.id,
+            before,
+            rank,
+        )
 
     async def main_puuid_of(self, player_id: int) -> str | None:
         return await self.repo.main_puuid(player_id)

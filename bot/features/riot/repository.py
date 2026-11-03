@@ -477,6 +477,14 @@ class RiotRepository:
                 PendingGame(r[0], from_db(r[1]), r[2], bool(r[3])) for r in await cur.fetchall()
             ]
 
+    async def last_game_at(self, account_id: int) -> datetime | None:
+        """When the account's newest stored ranked game ended (None = none stored)."""
+        async with self.db.conn.execute(
+            "SELECT MAX(played_at) FROM riot_role_games WHERE riot_account_id = ?", (account_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return from_db(row[0]) if row and row[0] is not None else None
+
     async def mark_announced(
         self,
         account_id: int,

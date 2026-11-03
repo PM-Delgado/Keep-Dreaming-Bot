@@ -242,14 +242,17 @@ class Riot(commands.Cog):
             return
         busy = summary.started or summary.posted or summary.skipped or summary.failed
         log.log(
-            logging.INFO if busy or summary.stopped or summary.waiting else logging.DEBUG,
+            logging.INFO
+            if busy or summary.stopped or summary.waiting or summary.adjusted
+            else logging.DEBUG,
             "Feed cycle: %d account(s), %d started, %d posted, %d skipped, %d waiting for the "
-            "rank, %d failed%s",
+            "rank, %d adjusted, %d failed%s",
             summary.watched,
             summary.started,
             summary.posted,
             summary.skipped,
             summary.waiting,
+            summary.adjusted,
             summary.failed,
             f"; stopped early: {summary.stopped}" if summary.stopped else "",
         )
