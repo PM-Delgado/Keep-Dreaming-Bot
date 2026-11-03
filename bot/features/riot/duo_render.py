@@ -87,16 +87,16 @@ def champion_ids(stats: DuoStats) -> list[str]:
 
 
 def _streak_line(stats: DuoStats) -> str | None:
-    """`Sequência atual: 🔥 3 vitórias · Maior: 6`, or `Maior sequência de vitórias: 6` when the
-    current run is shorter than two games. Streaks of one game are not worth a line."""
+    """`Sequência atual: 🔥 **3 vitórias** · Maior: 6`, or `Maior sequência de vitórias: 6` when
+    the current run is shorter than two games. Streaks of one game are not worth a line."""
     current = stats.current
     longest = stats.longest_win.length if stats.longest_win is not None else 0
     parts = []
     if current.length >= 2:
         parts.append(
-            f"Sequência atual: 🔥 {current.length} vitórias"
+            f"Sequência atual: 🔥 **{current.length} vitórias**"
             if current.won
-            else f"Sequência atual: 💀 {current.length} derrotas"
+            else f"Sequência atual: 💀 **{current.length} derrotas**"
         )
         if longest >= 2:
             parts.append(f"Maior: {longest}")
@@ -113,7 +113,7 @@ def _pair_lines(pairs: Sequence[PairTally], label: Callable[[str], str]) -> list
 
 def _kda_line(name: str, kda: PlayerKda) -> str:
     kills, deaths, assists = kda.average()
-    return f"**{name}** {kills:.1f}/{deaths:.1f}/{assists:.1f} ({kda.ratio:.1f})"
+    return f"**{name}** | {kills:.1f}/{deaths:.1f}/{assists:.1f} ({kda.ratio:.1f})"
 
 
 def _compare_line(name: str, other: str, compare: WithWithout) -> str:
@@ -147,7 +147,7 @@ def _summary_lines(
     champion_icons: Mapping[str, str],
     champion_names: Mapping[str, str],
 ) -> list[str]:
-    lines = [f"Jogos na mesma equipa: **{stats.games}** · {_record(stats.tally)}"]
+    lines = [f"Jogos: **{stats.games}** | {_record(stats.tally)}"]
     if (streak := _streak_line(stats)) is not None:
         lines.append(streak)
     if stats.games < MIN_PERCENT:
