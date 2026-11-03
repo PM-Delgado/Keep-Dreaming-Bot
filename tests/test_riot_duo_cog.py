@@ -57,8 +57,8 @@ def shared(n: int, wins: int | None = None, start: int = 0):
 def test_the_summary_headline_record_and_streaks():
     text = text_of(stats_of(shared(8, wins=6)))
     assert text.startswith("# 🤝 Duo · Ana + Rui")
-    assert "Jogos na mesma equipa: **8** · 6V 2D (75%)" in text
-    assert "Sequência atual: 💀 2 derrotas · Maior: 6" in text  # wins come first, then 2 losses
+    assert "Jogos: **8** | 6V 2D (75%)" in text
+    assert "Sequência atual: 💀 **2 derrotas** · Maior: 6" in text  # wins first, then 2 losses
 
 
 def test_a_short_current_streak_is_left_out_and_the_longest_stands_alone():
@@ -78,13 +78,13 @@ def test_a_streak_inside_one_day_shows_one_date():
 
 def test_a_current_winning_streak_is_a_fire():
     games = [duo_game("a", day(0), win=False), *shared(3, start=1)]
-    assert "Sequência atual: 🔥 3 vitórias · Maior: 3" in text_of(stats_of(games))
+    assert "Sequência atual: 🔥 **3 vitórias** · Maior: 3" in text_of(stats_of(games))
 
 
 def test_percentages_wait_for_a_minimum_sample():
     text = text_of(stats_of(shared(4, wins=3)))
-    headline = next(line for line in text.split("\n") if line.startswith("Jogos na mesma"))
-    assert headline.endswith("**4** · 3V 1D")  # no percentage
+    headline = next(line for line in text.split("\n") if line.startswith("Jogos:"))
+    assert headline == "Jogos: **4** | 3V 1D"  # no percentage
     assert "Amostra pequena: percentagens a partir de 5 jogos." in text
 
 
@@ -109,7 +109,7 @@ def test_only_the_three_most_played_pairs_are_listed():
 def test_kda_together_per_player():
     games = [duo_game("m1", day(0), kda_a=(10, 2, 6), kda_b=(2, 4, 12))]
     text = text_of(stats_of(games))
-    assert "**Ana** 10.0/2.0/6.0 (8.0)" in text and "**Rui** 2.0/4.0/12.0 (3.5)" in text
+    assert "**Ana** | 10.0/2.0/6.0 (8.0)" in text and "**Rui** | 2.0/4.0/12.0 (3.5)" in text
 
 
 def test_with_and_without_appears_only_when_both_sides_have_enough_games():

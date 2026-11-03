@@ -103,7 +103,7 @@ account), and from then on the bot follows them by itself.
   same team: record, streaks, role and champion pairs, KDA, recent games, records, and each player's win
   rate with and without the other. It only reads stored games, counts every linked account once and says
   plainly that being on the same team is not proof of a premade duo. The post-game card names a linked
-  teammate in its title (`Ganhou (Duo c/ João)`).
+  teammate in its title (`Ganhou (Duo c/ Coach)`).
 - **Kept up to date by itself.** Ranks and games refresh when a profile is opened, when a ready-check
   starts and on a timer, so nobody has to run `/riot refresh`.
 
