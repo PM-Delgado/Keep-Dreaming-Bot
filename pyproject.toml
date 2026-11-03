@@ -18,6 +18,7 @@ dependencies = [
     "aiohttp>=3.9",  # Riot API client (already a discord.py dependency; declared explicitly)
     "openskill==6.2.0",  # Plackett-Luce team ratings (MIT); only bot/features/ratings/engine.py imports it
     "tzdata",  # IANA timezone data for zoneinfo on Windows
+    "Pillow>=11",  # the two-player picture of /riot duo and /rivalry; only icons/pair_avatar.py imports it
 ]
 
 [project.optional-dependencies]

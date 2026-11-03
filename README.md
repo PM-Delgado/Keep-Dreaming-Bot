@@ -281,8 +281,8 @@ them.
 
 ## 🙏 Acknowledgements
 
-Built with [discord.py](https://github.com/Rapptz/discord.py) and [OpenSkill](https://github.com/OpenDebates/openskill.py)
-for the team ratings. Champion data and icons come from Riot's Data Dragon, and the role and rank icons from
+Built with [discord.py](https://github.com/Rapptz/discord.py), [OpenSkill](https://github.com/OpenDebates/openskill.py)
+for the team ratings and [Pillow](https://python-pillow.org) for the two-player picture of `/riot duo` and `/rivalry`. Champion data and icons come from Riot's Data Dragon, and the role and rank icons from
 [Community Dragon](https://www.communitydragon.org).
 
 ## 📜 Riot Games disclaimer

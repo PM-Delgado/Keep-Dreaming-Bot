@@ -5,9 +5,11 @@ from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
+import discord
 import pytest
 import pytest_asyncio
 from riot_fakes import NOW, FakeRiot, Stack, days_ago
+from test_pair_avatar import RED, YELLOW, avatars_of, decode, fake_guild
 from test_riot_cog import ENV
 from test_riot_duo import day, duo_game, row, stats_of
 
@@ -121,17 +123,18 @@ def test_with_and_without_appears_only_when_both_sides_have_enough_games():
     assert "**Com e sem** (desde 31/08/2026)" in text  # the coverage date, in Lisbon time
     assert "**Ana**: 100% com Rui (10) · 50% sem (10)" in text
     assert "**Rui**: 100% com Ana (10) · 20% sem (10)" in text
-    assert "Comparação apenas indicativa" in text
+    assert "indicativa" not in text  # no disclaimer under the numbers
     few = text_of(stats_of(shared(MIN_COMPARE), coverage=day(-1)))
     assert "Com e sem" not in few  # nobody has "without" games
 
 
-def test_the_notes_say_what_the_numbers_are_and_what_may_be_missing():
+def test_there_is_no_footer_unless_something_is_wrong_with_the_data():
     games = shared(3)
-    notes = text_of(stats_of(games, coverage=day(1)))
-    assert "Baseado em jogos ranked Solo/Duo guardados em que estavam na mesma equipa" in notes
-    assert "não prova que jogaram em duo" in notes
-    assert "Histórico completo desde 02/09/2026; jogos anteriores podem estar incompletos." in notes
+    for tab in (TAB_SUMMARY, TAB_RECORDS):
+        text = text_of(stats_of(games, coverage=day(1)), tab)
+        for gone in ("Baseado em", "não prova", "Histórico completo", "indicativa"):
+            assert gone not in text
+        assert not text.endswith("\n")  # nothing trails the numbers
     syncing = text_of(stats_of(games, syncing=("Beta#EUW",)))
     assert "histórico da conta Beta#EUW ainda está a sincronizar" in syncing
     two = text_of(stats_of(games, syncing=("A#EUW", "B#EUW")))
@@ -203,11 +206,14 @@ def test_a_record_that_needs_more_games_is_not_invented():
     assert "🔥 Maior sequência de vitórias: **2**" in text
 
 
-def test_no_shared_game_says_so_on_every_tab_and_keeps_the_notes():
-    empty = build_duo([row(1, "x", day(0), team=100)], [row(2, "y", day(0), team=100)])
+def test_no_shared_game_says_so_on_every_tab_and_keeps_the_data_notes():
+    empty = build_duo(
+        [row(1, "x", day(0), team=100)], [row(2, "y", day(0), team=100)], syncing=("Beta#EUW",)
+    )
     for tab in TABS:
         text = text_of(empty, tab)
-        assert NOTHING_SHARED in text and "Baseado em jogos" in text
+        assert NOTHING_SHARED in text and "ainda está a sincronizar" in text
+    assert "-#" not in text_of(build_duo([], []))  # nothing to warn about: just the answer
 
 
 def test_an_unknown_tab_shows_the_summary():
@@ -400,7 +406,6 @@ async def test_a_button_from_an_old_message_is_rebuilt_from_its_id():
 
 
 async def test_a_button_click_goes_to_the_riot_cog(cog):
-    import discord
     from discord.ext import commands
 
     flipped: list[tuple] = []
@@ -437,3 +442,49 @@ async def test_the_cog_registers_the_tab_buttons(cog):
     assert DuoTabButton in bot.items
     await cog.cog_unload()
     assert DuoTabButton not in bot.items
+
+
+# --- the half-and-half picture on the message -------------------------------------------------
+
+
+def guild_cog(stack: Stack, avatars: dict) -> Riot:
+    """A cog whose server knows only these members (the rest are 'unknown members')."""
+    bot = SimpleNamespace(settings=load_settings(ENV), get_guild=lambda _id: fake_guild(avatars))
+    return Riot(bot, stack.riot, None, FakeChampions())  # type: ignore[arg-type]
+
+
+async def test_the_duo_message_carries_the_half_and_half_picture(stack, world):
+    await play(stack, world)
+    cog = guild_cog(stack, avatars_of([]))
+    ix = FakeInteraction(1)
+    await cog.duo.callback(cog, ix, member(2))  # type: ignore[arg-type]
+    reply = ix.sent[0]
+    assert reply["embed"].thumbnail.url == "attachment://pair.png"
+    assert reply["file"].filename == "pair.png"
+    picture = decode(reply["file"].fp.read())
+    assert picture.getpixel((10, 128)) == RED and picture.getpixel((246, 128)) == YELLOW
+
+
+async def test_a_flip_attaches_the_picture_again_or_clears_a_stale_one(stack, world):
+    await play(stack, world)
+    cog = guild_cog(stack, avatars_of([]))
+    owner = FakeInteraction(1)
+    await cog.flip_duo(owner, TAB_GAMES, 1, 2, 1)  # type: ignore[arg-type]
+    assert owner.edited[0]["embed"].thumbnail.url == "attachment://pair.png"
+    assert [f.filename for f in owner.edited[0]["attachments"]] == ["pair.png"]
+    guest = FakeInteraction(5)
+    await cog.flip_duo(guest, TAB_GAMES, 1, 2, 1)  # type: ignore[arg-type]
+    assert guest.sent[0]["file"].filename == "pair.png" and not guest.edited
+    nobody = guild_cog(stack, {})
+    again = FakeInteraction(1)
+    await nobody.flip_duo(again, TAB_GAMES, 1, 2, 1)  # type: ignore[arg-type]
+    assert again.edited[0]["attachments"] == []  # no stale picture left on the message
+
+
+async def test_without_reachable_members_the_message_has_no_picture_at_all(stack, world):
+    await play(stack, world)
+    cog = guild_cog(stack, {})
+    ix = FakeInteraction(1)
+    await cog.duo.callback(cog, ix, member(2))  # type: ignore[arg-type]
+    assert ix.sent[0]["embed"].thumbnail.url is None and "file" not in ix.sent[0]
+    assert "Ana + Rui" in ix.sent[0]["embed"].description  # the answer itself is unharmed

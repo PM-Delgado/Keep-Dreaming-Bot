@@ -50,13 +50,6 @@ def _name(player: Player) -> str:
     return escape(player.nickname)
 
 
-def thumbnail_player(pair: PairStats, tab: str) -> Player:
-    """Whose avatar goes on the tab: the one ahead in the confrontations, else the first player."""
-    if tab == TAB_H2H and pair.h2h.b_wins > pair.h2h.a_wins:
-        return pair.b
-    return pair.a
-
-
 def champion_ids(pair: PairStats) -> list[str]:
     """The champions on the games tab (validated stats only), for the icon lookup."""
     rows = [row for game in pair.recent for row in (game.a, game.b)]
