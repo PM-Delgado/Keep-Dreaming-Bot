@@ -204,6 +204,104 @@ async def test_after_the_wait_a_game_whose_rank_never_moved_is_posted_with_no_lp
     assert summary.posted == 1 and posts.deltas == [0]  # 0 = unknown: the card shows no number
 
 
+# --- LP that Riot changes after the game (a griefer refund) -------------------------------------
+
+
+async def _lose_a_game(stack, world, clock, posts: Posts) -> None:
+    """Ana loses a game from 100 LP: the card says -30 and the baseline is 70."""
+    clock.advance(minutes=5)
+    finish(world, clock, "puuid-alpha", "EUW1_LOSS", 1, win=False)
+    world.set_rank("puuid-alpha", "MASTER", "I", 70)
+    await stack.riot.poll_new_games(posts)
+    assert posts.deltas == [-30]
+
+
+async def test_an_lp_refund_is_taken_in_so_the_next_win_shows_its_own_lp(stack, world, clock):
+    await start_watching(stack, clock)
+    posts = Posts()
+    await _lose_a_game(stack, world, clock, posts)
+    world.set_rank("puuid-alpha", "MASTER", "I", 100)  # Riot flags a troll and refunds the 30 LP
+    summary = await stack.riot.poll_new_games(posts)  # first sight: not trusted yet
+    assert summary.adjusted == 0 and (await alpha(stack)).feed_rank == SoloRank("MASTER", None, 70)
+    clock.advance(minutes=5)
+    assert (await stack.riot.poll_new_games(posts)).adjusted == 0  # still inside the wait
+    clock.advance(minutes=5)
+    summary = await stack.riot.poll_new_games(posts)
+    assert summary.adjusted == 1 and summary.posted == 0
+    account = await alpha(stack)
+    assert account.feed_rank == SoloRank("MASTER", None, 100)
+    saved = await stack.rows("SELECT rank_lp FROM riot_accounts WHERE id = ?", account.id)
+    assert saved == [(100,)]  # the leaderboard's rank is current too
+    # The next game: a 30 LP win is +30, not +60.
+    clock.advance(minutes=5)
+    finish(world, clock, "puuid-alpha", "EUW1_WIN", 1)
+    world.set_rank("puuid-alpha", "MASTER", "I", 130)
+    await stack.riot.poll_new_games(posts)
+    assert posts.deltas == [-30, 30]
+    assert (await stack.riot.poll_new_games(posts)).adjusted == 0 and len(posts.items) == 2
+
+
+async def test_without_the_fix_a_refund_would_show_up_in_the_next_card(stack, world, clock):
+    """The same story, with the next game arriving before the refund was taken in: the card has
+    to keep working as before (the number is the rank minus the baseline)."""
+    await start_watching(stack, clock)
+    posts = Posts()
+    await _lose_a_game(stack, world, clock, posts)
+    world.set_rank("puuid-alpha", "MASTER", "I", 100)
+    await stack.riot.poll_new_games(posts)  # drift seen, not yet taken in
+    clock.advance(minutes=2)
+    finish(world, clock, "puuid-alpha", "EUW1_WIN", 1)
+    world.set_rank("puuid-alpha", "MASTER", "I", 130)
+    await stack.riot.poll_new_games(posts)
+    assert posts.deltas == [-30, 60]  # indistinguishable from a bigger win: the known limit
+
+
+async def test_a_game_that_is_slow_to_appear_is_not_swallowed_as_an_adjustment(stack, world, clock):
+    await start_watching(stack, clock)
+    clock.advance(minutes=5)
+    finish(world, clock, "puuid-alpha", "EUW1_OLD", 20)  # keeps the account inside the window
+    await stack.riot.poll_new_games(Posts())
+    # The rank moved with a game Riot's list does not show yet.
+    world.set_rank("puuid-alpha", "MASTER", "I", 127)
+    clock.advance(minutes=5)
+    posts = Posts()
+    assert (await stack.riot.poll_new_games(posts)).adjusted == 0
+    clock.advance(minutes=3)
+    finish(world, clock, "puuid-alpha", "EUW1_NEW", 2)  # now it shows up, before the wait is over
+    await stack.riot.poll_new_games(posts)
+    assert posts.ids == ["EUW1_NEW"] and 27 in posts.deltas
+
+
+async def test_a_rank_that_keeps_moving_restarts_the_wait(stack, world, clock):
+    await start_watching(stack, clock)
+    posts = Posts()
+    await _lose_a_game(stack, world, clock, posts)
+    world.set_rank("puuid-alpha", "MASTER", "I", 85)
+    await stack.riot.poll_new_games(posts)
+    clock.advance(minutes=6)
+    world.set_rank("puuid-alpha", "MASTER", "I", 100)
+    await stack.riot.poll_new_games(posts)
+    clock.advance(minutes=6)  # 12 minutes since the first change, 6 since the last
+    assert (await stack.riot.poll_new_games(posts)).adjusted == 0
+    clock.advance(minutes=5)
+    assert (await stack.riot.poll_new_games(posts)).adjusted == 1
+    assert (await alpha(stack)).feed_rank == SoloRank("MASTER", None, 100)
+
+
+async def test_an_account_with_no_recent_game_costs_no_rank_request(stack, world, clock):
+    await start_watching(stack, clock)
+    clock.advance(minutes=5)
+    finish(world, clock, "puuid-alpha", "EUW1_1", 1)
+    world.set_rank("puuid-alpha", "MASTER", "I", 120)
+    await stack.riot.poll_new_games(Posts())  # posted
+    clock.advance(hours=3)
+    before = world.count("/lol/league")
+    world.set_rank("puuid-alpha", "MASTER", "I", 150)  # not looked at: too long after the game
+    summary = await stack.riot.poll_new_games(Posts())
+    assert world.count("/lol/league") == before and summary.adjusted == 0
+    assert (await alpha(stack)).feed_rank == SoloRank("MASTER", None, 120)
+
+
 # --- several games, remakes, old games ----------------------------------------------------------
 
 
