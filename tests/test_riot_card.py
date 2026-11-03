@@ -349,6 +349,23 @@ def test_the_title_is_the_result_and_the_side_bar_has_its_colour():
     assert title_text(game(duration_s=200)) == "Remake (Solo/Duo)"
 
 
+def test_a_linked_teammate_replaces_the_queue_name_in_the_title():
+    assert title_text(game(), ["João"]) == "Ganhou (Duo c/ João)"
+    assert title_text(game(win=False), ["João"]) == "Perdeu (Duo c/ João)"
+    assert title_text(game(duration_s=200), ["João"]) == "Remake (Duo c/ João)"
+    # A duo is two people: with more of the group on the team nobody is called a duo.
+    assert title_text(game(), ["João", "Rui"]) == "Ganhou (c/ João e Rui)"
+    assert title_text(game(win=False), ["Ana", "João", "Rui"]) == "Perdeu (c/ Ana, João e Rui)"
+    assert title_text(game(), []) == "Ganhou (Solo/Duo)"  # never "Solo": a friend may be unlinked
+    assert title_text(game(), ["a*b"]) == "Ganhou (Duo c/ a\\*b)"  # nicknames are escaped
+
+
+def test_the_embed_title_and_footer_with_a_teammate():
+    embed = build_card_embed(card(teammates=("João",)))
+    assert embed.title == "Ganhou (Duo c/ João)"
+    assert embed.footer.text == "Solo/Duo"  # the queue stays in the footer
+
+
 def test_the_lp_change_sits_next_to_the_rank_with_an_arrow_and_in_bold():
     gold = SoloRank("GOLD", "I", 29)
     assert rank_text(gold, -21) == "GOLD I · 29 LP (📉 **-21**)"
@@ -553,6 +570,61 @@ async def test_card_source_refusals(stack, world):
 async def test_the_main_can_be_chosen_by_riot_id_case_insensitively(stack, world):
     await linked(stack, world)
     assert (await stack.riot.game_card(1, "alpha#euw")).riot_id == "Alpha#EUW"
+
+
+# --- teammates from the group ---------------------------------------------------------------
+
+
+def test_teammates_are_the_other_players_of_the_same_team_only():
+    game = parse_ranked_game(match(ten_players(dict(MINE))), "me")
+    assert game is not None
+    assert game.team_id == 100
+    assert game.teammate_puuids == ("puuid-1", "puuid-2", "puuid-4", "puuid-5")  # not me, not red
+
+
+def test_without_team_ids_there_are_no_teammates_and_no_team():
+    players = [{k: v for k, v in p.items() if k != "teamId"} for p in ten_players(dict(MINE))]
+    game = parse_ranked_game(match(players), "me")
+    assert game is not None
+    assert game.team_id is None and game.teammate_puuids == ()
+
+
+def put_in_the_team(world: FakeRiot, participant_id: int, puuid: str) -> None:
+    """Make an account of the group the player with this participant id in the stored match."""
+    for p in world.matches["EUW1_1"]["info"]["participants"]:
+        if p["participantId"] == participant_id:
+            p["puuid"] = puuid
+
+
+async def test_the_card_names_the_linked_players_who_were_on_the_team(stack, world):
+    await linked(stack, world)
+    await stack.riot.link(2, "Beta#EUW", None, 1)
+    await stack.riot.wait_for_background()
+    put_in_the_team(world, 4, "puuid-beta")
+    world.calls.clear()
+    source = await stack.riot.game_card(1)
+    assert source.teammates == ("Rui",)
+    assert len(world.calls) == 3  # the match, its timeline, the rank: naming Rui cost nothing
+    put_in_the_team(world, 8, "puuid-beta")  # on the other team now
+    put_in_the_team(world, 4, "puuid-stranger")
+    assert (await stack.riot.game_card(1)).teammates == ()
+
+
+async def test_a_second_account_of_the_owner_is_not_a_teammate(stack, world):
+    await linked(stack, world)
+    await stack.riot.link(1, "Beta#EUW", None, 1)  # Ana's own second account
+    await stack.riot.wait_for_background()
+    put_in_the_team(world, 4, "puuid-beta")
+    assert (await stack.riot.game_card(1)).teammates == ()
+
+
+async def test_players_who_left_are_not_named(stack, world):
+    await linked(stack, world)
+    await stack.riot.link(2, "Beta#EUW", None, 1)
+    await stack.riot.wait_for_background()
+    put_in_the_team(world, 4, "puuid-beta")
+    await stack.players.repo.set_left((await stack.players.require(2)).id, NOW)
+    assert (await stack.riot.game_card(1)).teammates == ()
 
 
 # --- /riot card ----------------------------------------------------------------------------

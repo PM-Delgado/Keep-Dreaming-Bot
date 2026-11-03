@@ -36,7 +36,7 @@ owns it. Linked account names are visible to everyone in the server.
 | Table | Content | Removed on `/riot unlink` |
 |---|---|---|
 | `riot_accounts` | PUUID, current Riot ID, platform, main flag, who linked it and when | yes |
-| `riot_role_games` | per ranked Solo/Duo game: id, time, position, win, K/D/A, duration, champion, CS and a few totals; shown by `/riot history` | yes |
+| `riot_role_games` | per ranked Solo/Duo game: id, time, position, win, K/D/A, duration, champion, CS and a few totals, and the team (Riot's `teamId`, 100 or 200; empty for games stored before migration 17); shown by `/riot history` | yes |
 | `rank_signals` (source `riot`) | the account's Solo/Duo tier and division over time (feeds the in-house rating) | yes |
 | `riot_role_games` (feed columns) | for games the automatic feed handled: when it was handled, the LP the game changed and the rank after it (shown in `/riot history`) | yes (cascade) |
 | `riot_accounts.feed_*` | when the feed started watching the account, whether it does, and the Solo/Duo rank after the last game it handled (the next LP change is measured against it) | yes (the row) |
@@ -46,6 +46,19 @@ owns it. Linked account names are visible to everyone in the server.
 
 After an unlink nothing in the database references the PUUID, and ratings are unaffected. Only the
 current Riot ID is stored; old ones are not kept.
+
+**How long games are kept.** Each account keeps its newest 100 ranked games from the last 12 months.
+A game older than the newest 100 is **also kept when another player's linked account played the same
+match** (still inside the 12 months): it costs no request and is what shared-team statistics need.
+The rule compares *players*, so two accounts of one person do not keep each other's games. When
+either account is unlinked (or the player leaves) the shared game is no longer shared and the next
+history sync drops it from the other account. `/riot list` counts and the champion pool can therefore
+include a few games beyond 100; the role estimate still reads the newest 100.
+
+**Teammates on the post-game card.** The card is built from the full match, which lists the other nine
+players. The PUUIDs of the players on the same team are compared with the linked accounts to name
+group members in the title (`Ganhou (Duo c/ João)`). They are looked up on the fly: **no PUUID of a
+stranger is stored**, and no request is added.
 
 ## When Riot is asked
 

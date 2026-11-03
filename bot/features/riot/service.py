@@ -24,6 +24,7 @@ from bot.features.riot.client import (
     RiotRateLimited,
     SoloRank,
 )
+from bot.features.riot.duo import DuoStats, build_duo
 from bot.features.riot.leaderboard import LISBON, Row, build_rows
 from bot.features.riot.lp import ladder_points, lp_delta
 from bot.features.riot.platforms import normalise_platform
@@ -123,6 +124,24 @@ class HistoryView:
     account: AccountRow | None  # set when one account was asked for
 
 
+SAME_PLAYER = "Escolhe dois jogadores diferentes."
+
+
+class DuoError(PlayerError):
+    """`/riot duo` was refused; `discord_id` is the player who is not registered, if that is why."""
+
+    def __init__(self, message: str, discord_id: int | None = None) -> None:
+        super().__init__(message)
+        self.discord_id = discord_id
+
+
+@dataclass(frozen=True)
+class DuoReport:
+    a: Player
+    b: Player
+    stats: DuoStats
+
+
 @dataclass(frozen=True)
 class CardSource:
     """What the post-game card needs from Riot for one game (fetched fresh, nothing stored)."""
@@ -132,6 +151,9 @@ class CardSource:
     game: RankedGame
     laning: Laning | None  # None: no opponent, under 15 minutes, or the timeline failed
     rank: SoloRank | None  # the account's rank right now
+    # Group members (other than the owner) on the same team, A-Z; read from the match already
+    # fetched, so it costs no request and nothing is stored.
+    teammates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -355,6 +377,46 @@ class RiotService:
             account=chosen,
         )
 
+    async def duo(self, discord_a: int, discord_b: int) -> DuoReport:
+        """Two players' ranked games on the same team (see `duo`), from what is stored.
+
+        Costs no Riot requests and works without a key, like `recent_history`: the feed and the
+        timers keep the games current. Raises `DuoError`."""
+        if discord_a == discord_b:
+            raise DuoError(SAME_PLAYER)
+        found: list[Player] = []
+        for discord_id in (discord_a, discord_b):
+            try:
+                found.append(await self.players.require(discord_id))
+            except PlayerError as exc:
+                raise DuoError(str(exc), discord_id) from exc
+        a, b = found
+        accounts: list[AccountRow] = []
+        for player in found:
+            owned = await self.repo.list_accounts(player.id)
+            if not owned:
+                raise DuoError(f"{player.nickname} não tem contas Riot ligadas.")
+            accounts.extend(owned)
+        syncing = tuple(acc.riot_id for acc in accounts if acc.history_synced_at is None)
+        coverage = None
+        if not syncing:
+            keep = self.history.max_games_per_account
+            cutoff = self.clock() - timedelta(days=self.history.window_days)
+            coverage = max(
+                [await self.repo.complete_since(acc.id, keep, cutoff) for acc in accounts]
+            )
+        rows = await self.repo.duo_rows([a.id, b.id])
+        return DuoReport(
+            a,
+            b,
+            build_duo(
+                [r for r in rows if r.player_id == a.id],
+                [r for r in rows if r.player_id == b.id],
+                coverage,
+                syncing,
+            ),
+        )
+
     async def game_card(self, discord_id: int, riot_id: str | None = None) -> CardSource:
         """The newest stored ranked game of a player (or of one account), fetched again from
         Riot with everything the card shows: the match, the 15:00 numbers (best effort) and the
@@ -417,7 +479,8 @@ class RiotService:
             raise
         except RiotError as exc:
             log.info("Card: no 15 minute numbers for %s: %s", match_id, type(exc).__name__)
-        return CardSource(nickname, account.riot_id, game, laning, rank)
+        teammates = await self.repo.linked_nicknames(game.teammate_puuids, account.player_id)
+        return CardSource(nickname, account.riot_id, game, laning, rank, tuple(teammates))
 
     # --- post-game feed ---------------------------------------------------------------------
 

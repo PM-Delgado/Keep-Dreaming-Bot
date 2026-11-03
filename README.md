@@ -99,6 +99,11 @@ account), and from then on the bot follows them by itself.
 - **Ranked history.** `/riot history` lists a player's recent ranked games, two rows each, with the LP
   change for the games the bot saw live. `/riot list` shows the linked accounts and `/riot main` changes
   the main one.
+- **Duo statistics.** `/riot duo` shows how two players do in ranked Solo/Duo games they played on the
+  same team: record, streaks, role and champion pairs, KDA, recent games, records, and each player's win
+  rate with and without the other. It only reads stored games, counts every linked account once and says
+  plainly that being on the same team is not proof of a premade duo. The post-game card names a linked
+  teammate in its title (`Ganhou (Duo c/ João)`).
 - **Kept up to date by itself.** Ranks and games refresh when a profile is opened, when a ready-check
   starts and on a timer, so nobody has to run `/riot refresh`.
 
@@ -178,7 +183,7 @@ or private and what it answers, is in [docs/commands.md](docs/commands.md).
 |---|---|
 | **Players** | `/register`, `/profile view\|roles\|rank`, `/history`, `/stats`, `/leaderboard`, `/rivalry` |
 | **Lobbies and games** | `/lobby open\|schedule\|list\|show\|cancel`, `/match show\|stats`; *admin:* `/match void\|fix\|set\|validate\|pending` |
-| **Riot** (optional) | `/riot link\|main\|unlink\|list\|history\|leaderboard\|refresh`; *admin:* `/riot card` (previews a game card) |
+| **Riot** (optional) | `/riot link\|main\|unlink\|list\|history\|duo\|leaderboard\|refresh`; *admin:* `/riot card` (previews a game card) |
 | **Admin** | `/admin player register`, `/admin rating inspect\|set\|rank\|recompute`, `/admin roles set`, `/sync` |
 | **Testing** (`ENABLE_MOCK_PLAYERS`) | `/mock create\|fill\|ready\|drop\|report\|confirm\|stats\|list\|clear` |
 | **Name of the day** | `/goomah`, `/goomahdor` |
@@ -226,7 +231,7 @@ bot/
   features/
     nameday/       the original name-of-the-day feature
     players/       roster, role proficiency, profile, admin rating and role commands
-    riot/          optional Riot API client, role experience, /riot commands
+    riot/          optional Riot API client, role experience, /riot commands, /riot duo rules and embeds
     champions/     champion list from Data Dragon (cached, with a bundled seed)
     icons/         role and rank icons (bundled PNGs uploaded as application emojis), shared upload helper
     ratings/       pure rating core: rank estimate, matchmaking estimate, ladder, OpenSkill, replay

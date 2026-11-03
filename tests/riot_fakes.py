@@ -69,33 +69,43 @@ class FakeRiot:
         win: bool = True,
         kda: tuple[int, int, int] = (5, 3, 7),
         stats: dict[str, Any] | None = None,
+        team: int | None = None,
     ) -> None:
-        """`stats` adds raw participant fields (totalMinionsKilled, goldEarned, ...)."""
+        """`stats` adds raw participant fields (totalMinionsKilled, goldEarned, ...). `team`
+        (100 or 200) sets `teamId`; without it the field is absent, as in old payloads.
+
+        Adding a second puuid under an existing `match_id` makes them share the match (the
+        match's queue, time and duration stay those of the first call)."""
         stamp = int(when.timestamp() * 1000)
         self.match_ids.setdefault(puuid, []).insert(0, match_id)
-        self.matches[match_id] = {
-            "metadata": {"matchId": match_id},
-            "info": {
-                "queueId": queue,
-                "gameCreation": stamp,
-                "gameEndTimestamp": stamp + duration * 1000,
-                "participants": [
-                    {
-                        "puuid": puuid,
-                        "teamPosition": position or "",
-                        "individualPosition": individual if individual is not None else position,
-                        "win": win,
-                        "kills": kda[0],
-                        "deaths": kda[1],
-                        "assists": kda[2],
-                        "timePlayed": duration,
-                        "championName": champion,
-                        "gameEndedInEarlySurrender": early,
-                        **(stats or {}),
-                    }
-                ],
-            },
+        participant = {
+            "puuid": puuid,
+            "teamPosition": position or "",
+            "individualPosition": individual if individual is not None else position,
+            "win": win,
+            "kills": kda[0],
+            "deaths": kda[1],
+            "assists": kda[2],
+            "timePlayed": duration,
+            "championName": champion,
+            "gameEndedInEarlySurrender": early,
+            **({"teamId": team} if team is not None else {}),
+            **(stats or {}),
         }
+        existing = self.matches.get(match_id)
+        if existing is None:
+            self.matches[match_id] = {
+                "metadata": {"matchId": match_id},
+                "info": {
+                    "queueId": queue,
+                    "gameCreation": stamp,
+                    "gameEndTimestamp": stamp + duration * 1000,
+                    "participants": [participant],
+                },
+            }
+            return
+        others = [p for p in existing["info"]["participants"] if p["puuid"] != puuid]
+        existing["info"]["participants"] = [*others, participant]
 
     async def __call__(self, url: str, headers: Any) -> HttpResponse:
         parsed = urlparse(url)

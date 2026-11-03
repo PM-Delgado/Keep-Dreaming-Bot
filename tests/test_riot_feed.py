@@ -686,6 +686,7 @@ async def test_the_feed_loop_only_starts_with_a_channel_and_a_key(stack):
             riot_feed_channel_id=channel_id, guild_id=1
         )
         cog.bot.add_view = lambda view: None  # type: ignore[attr-defined]
+        cog.bot.add_dynamic_items = lambda *items: None  # type: ignore[attr-defined]
         cog.bot.wait_until_ready = ready  # type: ignore[attr-defined]
         assert enabled and stack.riot.enabled
         await cog.cog_load()
@@ -696,6 +697,7 @@ async def test_the_feed_loop_only_starts_with_a_channel_and_a_key(stack):
     disabled = Stack(stack.db, FakeRiot(), enabled=False)
     cog = feed_cog(disabled, Channel())
     cog.bot.add_view = lambda view: None  # type: ignore[attr-defined]
+    cog.bot.add_dynamic_items = lambda *items: None  # type: ignore[attr-defined]
     cog.bot.wait_until_ready = ready  # type: ignore[attr-defined]
     await cog.cog_load()
     assert cog.feed_poller.is_running() is False  # no key, no feed

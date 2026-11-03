@@ -170,6 +170,11 @@ class RankedGame:
     participant_id: int | None = None
     opponent_participant_id: int | None = None  # same position, other team
     opponent_champion: str | None = None
+    # Riot's teamId (100 or 200); stored, so shared games can be told from opposed ones later.
+    team_id: int | None = None
+    # PUUIDs of the other players on the same team. Only for the post-game card (who of the
+    # group was in the team); never stored.
+    teammate_puuids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -398,6 +403,18 @@ def _opponent(me: Mapping[str, Any], participants: list[Any]) -> Mapping[str, An
     )
 
 
+def _teammates(me: Mapping[str, Any], participants: list[Any]) -> tuple[str, ...]:
+    """PUUIDs of everyone else on the player's team (empty when the team can't be told)."""
+    team = me.get("teamId")
+    if team is None:
+        return ()
+    return tuple(
+        str(p["puuid"])
+        for p in participants
+        if p.get("teamId") == team and p.get("puuid") and p.get("puuid") != me.get("puuid")
+    )
+
+
 def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
     try:
         info = data["info"]
@@ -438,6 +455,8 @@ def parse_ranked_game(data: Any, puuid: str) -> RankedGame | None:
             if opponent
             else None,
             opponent_champion=opponent.get("championName") if opponent else None,
+            team_id=_optional_int(me.get("teamId")),
+            teammate_puuids=_teammates(me, participants),
         )
     except (KeyError, TypeError, ValueError, StopIteration) as exc:
         raise RiotUnavailable("unexpected match payload") from exc

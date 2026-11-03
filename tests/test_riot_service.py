@@ -326,6 +326,92 @@ async def test_old_and_surplus_games_are_pruned(stack, world):
     assert await stack.riot_repo.count_games(account.id) == 3  # newest three kept
 
 
+# --- shared games outlive the per-account cap, and the team is stored -------------------------
+
+
+async def two_players(stack, cap: int = 3):
+    """Ana (Alpha) and Rui (Beta) linked with no games yet, and a cap of `cap` games."""
+    alpha = (await stack.riot.link(1, "Alpha#EUW", None, ADMIN)).account
+    beta = (await stack.riot.link(2, "Beta#EUW", None, ADMIN)).account
+    await stack.riot.wait_for_background()
+    stack.riot.history = replace(stack.riot.history, max_games_per_account=cap)
+    return alpha, beta
+
+
+def add_alpha_games(world, shared_days: float = 5):
+    """Alpha: A_0..A_2 are the newest three, then the game shared with Beta, then an older one."""
+    for i in range(3):
+        world.add_game("puuid-alpha", f"A_{i}", "MIDDLE", days_ago(NOW, i + 1))
+    world.add_game("puuid-alpha", "S", "BOTTOM", days_ago(NOW, shared_days), team=100)
+    world.add_game("puuid-alpha", "A_old", "MIDDLE", days_ago(NOW, 6))
+    world.add_game("puuid-beta", "S", "UTILITY", days_ago(NOW, shared_days), team=100)
+    world.add_game("puuid-beta", "B_0", "TOP", days_ago(NOW, 1))
+
+
+async def match_ids(stack, account) -> set[str]:
+    return await stack.riot_repo.known_match_ids(account.id)
+
+
+async def test_a_game_two_players_share_is_kept_past_the_cap(stack, world):
+    alpha, beta = await two_players(stack)
+    add_alpha_games(world)
+    await stack.riot.sync_history(beta)  # Beta stores S first, so it is shared when Alpha prunes
+    await stack.riot.sync_history(alpha)
+    assert await match_ids(stack, alpha) == {"A_0", "A_1", "A_2", "S"}  # A_old is gone
+    assert await match_ids(stack, beta) == {"S", "B_0"}
+
+
+async def test_a_game_two_accounts_of_one_player_share_is_not_kept(stack, world):
+    alpha = (await stack.riot.link(1, "Alpha#EUW", None, ADMIN)).account
+    beta = (await stack.riot.link(1, "Beta#EUW", None, ADMIN)).account  # both are Ana's
+    await stack.riot.wait_for_background()
+    stack.riot.history = replace(stack.riot.history, max_games_per_account=3)
+    add_alpha_games(world)
+    await stack.riot.sync_history(beta)
+    await stack.riot.sync_history(alpha)
+    assert await match_ids(stack, alpha) == {"A_0", "A_1", "A_2"}  # nobody else played S
+
+
+async def test_a_shared_game_older_than_the_window_is_still_forgotten(stack, world):
+    alpha, beta = await two_players(stack)
+    add_alpha_games(world, shared_days=400)
+    await stack.riot.sync_history(beta)
+    await stack.riot.sync_history(alpha)
+    assert "S" not in await match_ids(stack, alpha)
+    assert "S" not in await match_ids(stack, beta)
+
+
+async def test_a_game_stops_being_kept_when_the_other_player_unlinks(stack, world):
+    alpha, beta = await two_players(stack)
+    add_alpha_games(world)
+    await stack.riot.sync_history(beta)
+    await stack.riot.sync_history(alpha)
+    await stack.riot.unlink(2, "Beta#EUW")  # Beta's rows go with the account (cascade)
+    await stack.riot.sync_history(alpha)  # the next prune finds S shared with nobody
+    assert await match_ids(stack, alpha) == {"A_0", "A_1", "A_2"}
+
+
+async def test_the_extra_shared_games_do_not_change_the_role_estimate_input(stack, world):
+    alpha, beta = await two_players(stack)
+    add_alpha_games(world)
+    await stack.riot.sync_history(beta)
+    await stack.riot.sync_history(alpha)
+    assert await stack.riot_repo.count_games(alpha.id) == 4  # S is the extra one
+    ana = await stack.players.require(1)
+    seen = await stack.riot_repo.observations(ana.id, NOW, 365, 3)
+    assert len(seen) == 3  # only the newest three count, as before
+    assert [g.team_position for g in seen] == ["MIDDLE"] * 3
+
+
+async def test_the_team_is_stored_for_new_games_and_absent_for_old_payloads(stack, world):
+    alpha, _ = await two_players(stack)
+    world.add_game("puuid-alpha", "T_1", "MIDDLE", days_ago(NOW, 1), team=200)
+    world.add_game("puuid-alpha", "T_2", "MIDDLE", days_ago(NOW, 2))  # no teamId in the payload
+    await stack.riot.sync_history(alpha)
+    rows = await stack.rows("SELECT riot_match_id, team_id FROM riot_role_games ORDER BY 1")
+    assert [tuple(r) for r in rows] == [("T_1", 200), ("T_2", None)]
+
+
 async def test_estimates_pool_every_linked_account_into_one_person(stack, world):
     for i in range(14):
         world.add_game("puuid-alpha", f"A_{i}", "MIDDLE", days_ago(NOW, i + 1))

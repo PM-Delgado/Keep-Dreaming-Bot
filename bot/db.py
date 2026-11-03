@@ -393,6 +393,14 @@ MIGRATIONS: list[str] = [
     ALTER TABLE match_participants ADD COLUMN proficiency_json TEXT;
     UPDATE match_participants SET proficiency_json = '{{' || {_PROFILE_BACKFILL} || '}}';
     """,
+    # 17: which team the player was on in a stored ranked game (Riot's teamId, 100 or 200). NULL
+    # for games stored before this migration: two rows of one match are then told apart by `win`
+    # (one team wins every finished game). The index finds the other linked accounts that played
+    # the same match (shared games are kept past the per-account cap, see `RiotRepository.prune`).
+    """
+    ALTER TABLE riot_role_games ADD COLUMN team_id INTEGER;
+    CREATE INDEX riot_role_games_by_match ON riot_role_games(riot_match_id);
+    """,
 ]
 
 _OWNER: ContextVar[object | None] = ContextVar("db_transaction_owner", default=None)

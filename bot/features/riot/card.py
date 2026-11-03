@@ -2,7 +2,7 @@
 (names, icons, the rank after the game, the LP change) is passed in.
 
     ┃ [avatar] Nickname (Name#TAG)                                  [champion]
-    ┃ Ganhou (Solo/Duo)
+    ┃ Ganhou (Solo/Duo)            (or "Ganhou (Duo c/ João)" with a group member on the team)
     ┃ [role] **Yone**
     ┃ [tier] MASTER · 790 LP (📈 **+27**)
     ┃ 🔥 Quadra kill
@@ -23,7 +23,7 @@ are padded with blank ones to a multiple of three, or the last row would be two 
 do not line up with the three above.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import discord
@@ -60,6 +60,7 @@ class CardData:
     lp_delta: int | None = None  # None = unknown (never guessed)
     champion_icon_url: str | None = None
     avatar_url: str | None = None
+    teammates: tuple[str, ...] = ()  # group members on the same team (nicknames), A-Z
 
 
 def is_remake(game: RankedGame) -> bool:
@@ -72,12 +73,28 @@ def result_color(game: RankedGame) -> discord.Color:
     return discord.Color.green() if game.win else discord.Color.red()
 
 
-def title_text(game: RankedGame) -> str:
+def join_names(names: Sequence[str]) -> str:
+    """`João`, `João e Rui`, `João, Rui e Ana`."""
+    if len(names) <= 1:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} e {names[-1]}"
+
+
+def title_text(game: RankedGame, teammates: Sequence[str] = ()) -> str:
     """`Ganhou (Solo/Duo)`, `Perdeu (Solo/Duo)` or `Remake (Solo/Duo)`: the result only, the LP
-    change is next to the rank."""
-    if is_remake(game):
-        return "Remake (Solo/Duo)"
-    return f"{'Ganhou' if game.win else 'Perdeu'} (Solo/Duo)"
+    change is next to the rank.
+
+    When someone from the group was on the same team, the queue name gives way to who it was:
+    `Ganhou (Duo c/ João)` for one, `Ganhou (c/ João e Rui)` for more (a duo is two people).
+    Never "Solo": an unlinked friend on the team can't be ruled out, so without a linked
+    teammate the title keeps the queue name."""
+    result = "Remake" if is_remake(game) else ("Ganhou" if game.win else "Perdeu")
+    names = [discord.utils.escape_markdown(n) for n in teammates]
+    if not names:
+        return f"{result} (Solo/Duo)"
+    if len(names) == 1:
+        return f"{result} (Duo c/ {names[0]})"
+    return f"{result} (c/ {join_names(names)})"
 
 
 def rank_text(rank: SoloRank, lp_delta: int | None, icon: str = "") -> str:
@@ -171,7 +188,7 @@ def build_card_embed(
     if (kill := best_multikill(game)) is not None:
         lines.append(kill)
     embed = discord.Embed(
-        title=title_text(game),
+        title=title_text(game, card.teammates),
         description="\n".join(lines),
         color=result_color(game),
         timestamp=game.played_at,
