@@ -36,6 +36,7 @@ async def test_registers_exactly_the_expected_commands():
         "history",
         "stats",
         "leaderboard",
+        "rivalry",
     }
     assert EXTENSIONS == (
         "bot.features.nameday.cog",

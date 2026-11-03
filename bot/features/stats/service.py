@@ -13,12 +13,14 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-from bot.features.matches.repository import PENDING, ROLE_ORDER, VALIDATED
+from bot.features.matches.repository import PENDING, ROLE_ORDER
 from bot.features.players.repository import Player
-from bot.features.players.service import PlayerService
+from bot.features.players.service import PlayerError, PlayerService
 from bot.features.ratings.ladder import step_progress, step_rank
 from bot.features.ratings.service import RatingService
+from bot.features.stats.pairs import PairStats, build_pair
 from bot.features.stats.repository import GameRow, StatsRepository
+from bot.features.stats.tally import Tally
 
 MIN_BOARD_GAMES = 5  # for the win-rate and KDA boards (KDA counts validated games)
 HISTORY_LIMIT = 10
@@ -26,20 +28,6 @@ TOP_BREAKDOWN = 5  # champions and champion x role lines shown in /stats
 
 RANK, WIN_RATE, KDA = "rank", "winrate", "kda"
 BOARDS = (RANK, WIN_RATE, KDA)
-
-
-@dataclass(frozen=True)
-class Tally:
-    wins: int = 0
-    losses: int = 0
-
-    @property
-    def games(self) -> int:
-        return self.wins + self.losses
-
-    @property
-    def win_rate(self) -> float | None:
-        return self.wins / self.games if self.games else None
 
 
 @dataclass(frozen=True)
@@ -113,13 +101,7 @@ class BoardEntry:
 
 def _has_stats(row: GameRow) -> bool:
     """Validated stats with every number present (the database keeps them together)."""
-    return (
-        row.stats_status == VALIDATED
-        and row.champion is not None
-        and row.kills is not None
-        and row.deaths is not None
-        and row.assists is not None
-    )
+    return row.has_stats
 
 
 def _game_line(row: GameRow) -> GameLine:
@@ -191,6 +173,17 @@ def _with_positions(scored: Sequence[tuple[float, BoardEntry]]) -> list[BoardEnt
     return entries
 
 
+class PairError(PlayerError):
+    """`/rivalry` was refused; `discord_id` is the player who is not registered, if that is why."""
+
+    def __init__(self, message: str, discord_id: int | None = None) -> None:
+        super().__init__(message)
+        self.discord_id = discord_id
+
+
+SAME_PLAYER = "KD Scrims: Escolhe dois jogadores diferentes."
+
+
 class StatsService:
     def __init__(
         self, repo: StatsRepository, players: PlayerService, ratings: RatingService
@@ -198,6 +191,21 @@ class StatsService:
         self.repo = repo
         self.players = players
         self.ratings = ratings
+
+    async def pair(self, guild_id: int, discord_a: int, discord_b: int) -> PairStats:
+        """Two registered players' shared confirmed games (see `pairs`)."""
+        if discord_a == discord_b:
+            raise PairError(SAME_PLAYER)
+        found: list[Player] = []
+        for discord_id in (discord_a, discord_b):
+            try:
+                found.append(await self.players.require(discord_id))
+            except PlayerError as exc:
+                raise PairError(str(exc), discord_id) from exc
+        a, b = found
+        return build_pair(
+            a, b, await self.repo.games(guild_id, a.id), await self.repo.games(guild_id, b.id)
+        )
 
     async def history(self, guild_id: int, discord_id: int, limit: int = HISTORY_LIMIT) -> History:
         player = await self.players.require(discord_id)

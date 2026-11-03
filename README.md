@@ -68,6 +68,8 @@ and the docs are in English.
   role icons show up in lobbies, matches and profiles.
 - **History, stats and leaderboards.** `/history`, `/stats` and `/leaderboard` read the confirmed games.
   Raw ratings are never shown to players.
+- **Rivalries and synergy.** `/rivalry` compares two players: their games against each other, their games
+  on the same team and the games they shared, from the confirmed games only.
 The Scrims also use the [Riot integration](#-riot-integration) below: a linked account seeds the rating
 from the player's Solo/Duo rank and gives an estimate of their role experience.
 
@@ -173,7 +175,7 @@ or private and what it answers, is in [docs/commands.md](docs/commands.md).
 
 | Area | Commands |
 |---|---|
-| **Players** | `/register`, `/profile view\|roles\|rank`, `/history`, `/stats`, `/leaderboard` |
+| **Players** | `/register`, `/profile view\|roles\|rank`, `/history`, `/stats`, `/leaderboard`, `/rivalry` |
 | **Lobbies and games** | `/lobby open\|schedule\|list\|show\|cancel`, `/match show\|stats`; *admin:* `/match void\|fix\|set\|validate\|pending` |
 | **Riot** (optional) | `/riot link\|main\|unlink\|list\|history\|leaderboard\|refresh`; *admin:* `/riot card` (previews a game card) |
 | **Admin** | `/admin player register`, `/admin rating inspect\|set\|rank\|recompute`, `/admin roles set`, `/sync` |
@@ -230,7 +232,7 @@ bot/
     balance/       pure team balancer
     lobby/         lobby state machine, messages, buttons, /lobby /match /mock commands
     matches/       match records: results, confirmations, corrections, audit
-    stats/         read-only /history, /stats and /leaderboard from confirmed games
+    stats/         read-only /history, /stats, /leaderboard and /rivalry from confirmed games
     simulation/    scenarios, simulated seasons and the tuning lab (not loaded by the bot)
     roster/        roster file, seeding, test games, reset (not loaded by the bot)
     backtest/      replays the real games under other settings (not loaded by the bot)
