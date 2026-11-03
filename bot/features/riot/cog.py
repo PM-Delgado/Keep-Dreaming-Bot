@@ -9,7 +9,7 @@ import datetime as dt
 import logging
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -18,11 +18,13 @@ from discord.ext import commands, tasks
 from bot.features.champions.service import ChampionService
 from bot.features.icons.roles import RoleIconService
 from bot.features.icons.tiers import TierIconService
-from bot.features.players.service import PlayerError
+from bot.features.players.service import NOT_REGISTERED, PlayerError
 from bot.features.players.text import tier_color
 from bot.features.ratings.service import RatingError
 from bot.features.riot.card import CardData, build_card_embed
 from bot.features.riot.client import RiotClient
+from bot.features.riot.duo_render import TAB_SUMMARY, build_duo_embed, champion_ids
+from bot.features.riot.duo_views import DuoTabButton, duo_view
 from bot.features.riot.history import format_ago, format_line, format_summary, summarize, to_entry
 from bot.features.riot.leaderboard import LISBON
 from bot.features.riot.platforms import PLATFORMS
@@ -30,6 +32,7 @@ from bot.features.riot.repository import AccountRow, RiotRepository
 from bot.features.riot.service import (
     CONSENT_NOTICE,
     CardSource,
+    DuoError,
     FeedItem,
     HistoryView,
     LinkResult,
@@ -207,6 +210,8 @@ class Riot(commands.Cog):
 
     async def cog_load(self) -> None:
         self.refresher.start()
+        # One registered item answers every /riot duo tab button, also after a restart.
+        self.bot.add_dynamic_items(DuoTabButton)
         # One registered view answers every leaderboard message, even those posted before a restart.
         self.bot.add_view(LeaderboardView(self.service, self.tiers))
         if self.bot.settings.riot_feed_channel_id is not None and self.service.enabled:
@@ -214,6 +219,7 @@ class Riot(commands.Cog):
             self.feed_poller.start()
 
     async def cog_unload(self) -> None:
+        self.bot.remove_dynamic_items(DuoTabButton)
         self.refresher.cancel()
         self.daily_leaderboard.cancel()
         self.feed_poller.cancel()
@@ -523,6 +529,95 @@ class Riot(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
+    def _duo_refusal_text(self, interaction: discord.Interaction, exc: DuoError) -> str:
+        """Why `/riot duo` said no: the caller is told to register, anybody else is named."""
+        if exc.discord_id is None:
+            return str(exc)
+        if exc.discord_id == interaction.user.id:
+            return NOT_REGISTERED
+        member = interaction.guild.get_member(exc.discord_id) if interaction.guild else None
+        who = (
+            f"**{discord.utils.escape_markdown(member.display_name)}**"
+            if member
+            else "Esse jogador"
+        )
+        return f"KD Scrims: {who} não está registado."
+
+    async def _duo_message(
+        self, interaction: discord.Interaction, a_id: int, b_id: int, tab: str, owner_id: int
+    ) -> dict[str, Any]:
+        """Keyword arguments for send/edit: the embed of one tab and its buttons (none when the
+        two share no stored game). Raises `DuoError`."""
+        report = await self.service.duo(a_id, b_id)
+        stats = report.stats
+        ids = sorted(set(champion_ids(stats)))
+        names = await self.champions.names(ids) if self.champions else {}
+        icons = await self.champions.icon_markup(ids) if self.champions else {}
+        embed = build_duo_embed(
+            report.a.nickname,
+            report.b.nickname,
+            stats,
+            tab,
+            datetime.now(UTC),
+            self.icons.markup() if self.icons else {},
+            icons,
+            names,
+            await self._avatar_url(report.a.discord_id),
+        )
+        message: dict[str, Any] = {"embed": embed}
+        if stats.games:
+            message["view"] = duo_view(tab, a_id, b_id, owner_id)
+        return message
+
+    @riot.command(
+        name="duo",
+        description="Jogos ranked Solo/Duo de dois jogadores na mesma equipa.",
+    )
+    @app_commands.describe(
+        user="Com quem jogas.",
+        other="Um segundo jogador, para comparar os dois (por defeito, tu).",
+    )
+    async def duo(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        other: discord.Member | None = None,
+    ) -> None:
+        first, second = (user, other) if other else (interaction.user, user)
+        try:
+            message = await self._duo_message(
+                interaction, first.id, second.id, TAB_SUMMARY, interaction.user.id
+            )
+        except DuoError as exc:
+            log_refusal(interaction, exc)
+            await interaction.response.send_message(
+                self._duo_refusal_text(interaction, exc), ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            allowed_mentions=discord.AllowedMentions.none(), **message
+        )
+
+    async def flip_duo(
+        self, interaction: discord.Interaction, tab: str, a_id: int, b_id: int, owner_id: int
+    ) -> None:
+        """A tab button: the owner flips the public message; anybody else gets a private copy."""
+        owner = interaction.user.id == owner_id
+        try:
+            message = await self._duo_message(interaction, a_id, b_id, tab, interaction.user.id)
+        except DuoError as exc:
+            log_refusal(interaction, exc)
+            await interaction.response.send_message(
+                self._duo_refusal_text(interaction, exc), ephemeral=True
+            )
+            return
+        if owner:
+            await interaction.response.edit_message(**message)
+        else:
+            await interaction.response.send_message(
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none(), **message
+            )
+
     @riot.command(name="leaderboard", description="Classificação Solo/Duo das contas principais.")
     @app_commands.describe(post="Só admins: publicar também no canal do feed (atualiza os ranks).")
     async def leaderboard(self, interaction: discord.Interaction, post: bool = False) -> None:
@@ -583,6 +678,7 @@ class Riot(commands.Cog):
             lp_delta=lp_delta,
             champion_icon_url=icon,
             avatar_url=avatar_url,
+            teammates=source.teammates,
         )
         return build_card_embed(
             card,

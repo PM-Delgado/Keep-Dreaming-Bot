@@ -9,6 +9,7 @@ from typing import Any
 from bot.db import Database
 from bot.features.ratings.repository import from_db, to_db
 from bot.features.riot.client import RankedGame, SoloRank
+from bot.features.riot.duo import DuoRow
 from bot.features.riot.leaderboard import MainRank
 from bot.features.riot.roles import GameObservation
 
@@ -237,8 +238,8 @@ class RiotRepository:
         await self.db.conn.execute(
             "INSERT OR IGNORE INTO riot_role_games (riot_account_id, riot_match_id, played_at,"
             " team_position, individual_position, win, kills, deaths, assists, duration_s,"
-            " early_surrender, champion, cs, damage, gold, vision_score)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " early_surrender, champion, cs, damage, gold, vision_score, team_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 account_id,
                 game.match_id,
@@ -256,17 +257,26 @@ class RiotRepository:
                 game.damage,
                 game.gold,
                 game.vision_score,
+                game.team_id,
             ),
         )
         await self.db.conn.commit()
 
     async def prune(self, account_id: int, now: datetime, window_days: int, keep: int) -> None:
+        """Forget games older than the window and, beyond the newest `keep`, the ones nobody else
+        shares. A game another player's linked account also played stays (inside the window):
+        it is what `/riot duo` is made of, and it costs no request. It goes with the account when
+        either of them is unlinked, and the next prune drops what is no longer shared."""
         cutoff = to_db(now - timedelta(days=window_days))
         await self.db.conn.execute(
             "DELETE FROM riot_role_games WHERE riot_account_id = ? AND (played_at < ? OR"
-            " riot_match_id NOT IN (SELECT riot_match_id FROM riot_role_games"
-            " WHERE riot_account_id = ? ORDER BY played_at DESC LIMIT ?))",
-            (account_id, cutoff, account_id, keep),
+            " (riot_match_id NOT IN (SELECT riot_match_id FROM riot_role_games"
+            " WHERE riot_account_id = ? ORDER BY played_at DESC LIMIT ?)"
+            " AND NOT EXISTS (SELECT 1 FROM riot_role_games o"
+            " JOIN riot_accounts oa ON oa.id = o.riot_account_id"
+            " WHERE o.riot_match_id = riot_role_games.riot_match_id"
+            " AND oa.player_id <> (SELECT player_id FROM riot_accounts WHERE id = ?))))",
+            (account_id, cutoff, account_id, keep, account_id),
         )
         await self.db.conn.commit()
 
@@ -320,6 +330,66 @@ class RiotRepository:
             )
             for r in rows
         ]
+
+    async def duo_rows(self, player_ids: Sequence[int]) -> list[DuoRow]:
+        """Every stored ranked game of these players' accounts, newest first (for `/riot duo`)."""
+        marks = ", ".join("?" for _ in player_ids)
+        async with self.db.conn.execute(
+            "SELECT a.player_id, a.id, a.game_name, a.tag_line, a.is_main, g.riot_match_id,"
+            " g.played_at, g.team_position, g.win, g.kills, g.deaths, g.assists, g.duration_s,"
+            " g.early_surrender, g.champion, g.team_id"
+            " FROM riot_role_games g JOIN riot_accounts a ON a.id = g.riot_account_id"
+            f" WHERE a.player_id IN ({marks})"
+            " ORDER BY g.played_at DESC, g.riot_match_id DESC",
+            tuple(player_ids),
+        ) as cur:
+            return [
+                DuoRow(
+                    r[0],
+                    r[1],
+                    f"{r[2]}#{r[3]}",
+                    bool(r[4]),
+                    r[5],
+                    from_db(r[6]),
+                    r[7],
+                    bool(r[8]),
+                    r[9],
+                    r[10],
+                    r[11],
+                    r[12],
+                    bool(r[13]),
+                    r[14],
+                    r[15],
+                )
+                for r in await cur.fetchall()
+            ]
+
+    async def complete_since(self, account_id: int, keep: int, cutoff: datetime) -> datetime:
+        """From when the account holds every ranked game it played: the time of its `keep`-th
+        newest stored game (older ones may have been dropped by the cap), or `cutoff` (the start
+        of the history window) when it has fewer, because then nothing was ever dropped."""
+        async with self.db.conn.execute(
+            "SELECT played_at FROM riot_role_games WHERE riot_account_id = ?"
+            " ORDER BY played_at DESC LIMIT 1 OFFSET ?",
+            (account_id, keep - 1),
+        ) as cur:
+            row = await cur.fetchone()
+        return from_db(row[0]) if row else cutoff
+
+    async def linked_nicknames(self, puuids: Sequence[str], exclude_player_id: int) -> list[str]:
+        """Nicknames of the real players still in the group who own one of these accounts, each
+        once, A-Z. `exclude_player_id` (the card's owner) is left out, so a second account of the
+        same person never counts as a teammate."""
+        if not puuids:
+            return []
+        marks = ", ".join("?" for _ in puuids)
+        async with self.db.conn.execute(
+            f"SELECT DISTINCT p.nickname FROM riot_accounts a JOIN players p ON p.id = a.player_id"
+            f" WHERE a.puuid IN ({marks}) AND p.id <> ? AND p.is_mock = 0 AND p.left_at IS NULL"
+            f" ORDER BY p.nickname COLLATE NOCASE",
+            (*puuids, exclude_player_id),
+        ) as cur:
+            return [r[0] for r in await cur.fetchall()]
 
     async def champion_pool(self, player_id: int, limit: int) -> list[tuple[str, int]]:
         """(champion, games) of the stored ranked games across the accounts, most played first."""
